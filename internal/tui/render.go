@@ -230,7 +230,12 @@ func (r *Renderer) Draw(lines []string, cursorRow, cursorCol int) {
 	}
 	forceAll := curHasImage || r.prevHadImage
 	if forceAll {
-		w.WriteString(SeqClearScreen)
+		// No-home variant: the per-row MoveTo(i+1, 1) writes in the
+		// loop below position the cursor for every painted row, so
+		// the embedded \x1b[H would only serve to make VS Code snap
+		// its scrollbar to the top of the viewport on every image or
+		// selection-highlight frame.
+		w.WriteString(SeqClearScreenNoHome)
 		if curHasKittyImage {
 			// Delete previously placed kitty images once per frame,
 			// before rewriting all rows. Doing this inside each image
