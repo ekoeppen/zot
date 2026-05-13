@@ -741,13 +741,24 @@ func isWordSep(r rune) bool {
 // visualRow/visualCol describe where the cursor lands within the returned lines.
 func (e *Editor) Render(width int) (lines []string, visualRow, visualCol int) {
 	e.lastRenderWidth = width
-	promptLen := visibleWidth(e.Prompt)
+	// The Prompt may carry ANSI styling (theme-coloured glyph + reset).
+	// We must compute wrap geometry using its *visible* width only;
+	// otherwise the raw escape bytes leak into wrapLine's per-rune
+	// width accounting and the cursor column lands inside the row
+	// instead of at the end. See the wrapLine docs for why we keep it
+	// ANSI-unaware: the rest of the codebase relies on its simple
+	// rune-based behaviour for plain text and would regress if we
+	// taught it about escape sequences here. Strip ANSI from the
+	// prompt used for layout, then re-apply the original styling to
+	// the very first wrapped row before returning.
+	plainPrompt := stripANSI(e.Prompt)
+	promptLen := runewidth.StringWidth(plainPrompt)
 	indent := strings.Repeat(" ", promptLen)
 
 	for r, line := range e.Lines {
 		var prefix string
 		if r == 0 {
-			prefix = e.Prompt
+			prefix = plainPrompt
 		} else {
 			prefix = indent
 		}
@@ -763,6 +774,13 @@ func (e *Editor) Render(width int) (lines []string, visualRow, visualCol int) {
 			row, col := locateCursor(wrapped, prefix, line, targetRunes, indent)
 			visualRow = len(lines) + row
 			visualCol = col
+		}
+		// Re-attach the styled prompt to the very first wrapped row of
+		// the first logical line. All later rows are indent-only and
+		// don't need styling. The replacement is byte-exact because the
+		// plain prompt sits at the row's start.
+		if r == 0 && len(wrapped) > 0 && strings.HasPrefix(wrapped[0], plainPrompt) {
+			wrapped[0] = e.Prompt + wrapped[0][len(plainPrompt):]
 		}
 		lines = append(lines, wrapped...)
 	}
