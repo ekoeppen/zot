@@ -172,9 +172,9 @@ func (i *Interactive) runSwarm(ctx context.Context, args []string) {
 			case 0:
 				i.swarmStatus("", "/swarm resume: no resumable agents (none detached or terminated)")
 			case 1:
-				i.swarmStatus("1 resumable agent · press R to resume", "")
+				i.swarmStatus("1 resumable agent, press R to resume", "")
 			default:
-				i.swarmStatus(fmt.Sprintf("%d resumable agents · ↑/↓ to pick · R to resume", count), "")
+				i.swarmStatus(fmt.Sprintf("%d resumable agents, ↑/↓ to pick, R to resume", count), "")
 			}
 			return
 		}

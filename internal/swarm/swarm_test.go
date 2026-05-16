@@ -207,9 +207,9 @@ func TestSnapshotIsStableAcrossAccess(t *testing.T) {
 
 func TestTaskSlug(t *testing.T) {
 	cases := map[string]string{
-		"fix the login form":                "fix-the-login-form",
-		"  weird --- spaces!!  ":            "weird-spaces",
-		"":                                  "agent",
+		"fix the login form":                   "fix-the-login-form",
+		"  weird --- spaces!!  ":               "weird-spaces",
+		"":                                     "agent",
 		"a-very-long-task-name-that-overflows": "a-very-long-task-name-th",
 	}
 	for in, want := range cases {

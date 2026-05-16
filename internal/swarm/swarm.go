@@ -509,7 +509,7 @@ func (f *Swarm) SnapshotAll() []AgentSnapshot {
 // agentSink is the Sink the Swarm hands to each Runner.
 type agentSink struct{ a *Agent }
 
-func (s agentSink) Activity(msg string)    { s.a.setActivity(msg) }
+func (s agentSink) Activity(msg string)     { s.a.setActivity(msg) }
 func (s agentSink) Transcript(chunk string) { s.a.appendTranscript(chunk) }
 
 func truncate(s string, n int) string {

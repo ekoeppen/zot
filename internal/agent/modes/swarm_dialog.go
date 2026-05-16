@@ -948,7 +948,7 @@ func (d *swarmDialog) Render(th tui.Theme, width int) []string {
 		return d.renderTranscript(th, width)
 	}
 
-	out := []string{frameHeader(th, "swarm (n new · p prompt · R resume · ↑/↓ move · enter view · k kill · r remove · esc close)", width)}
+	out := []string{frameHeader(th, "swarm (n new, p prompt, R resume, ↑/↓ move, enter view, k kill, r remove, esc close)", width)}
 	if d.prompting {
 		return d.renderPromptEditor(th, width, out)
 	}
@@ -960,7 +960,7 @@ func (d *swarmDialog) Render(th tui.Theme, width int) []string {
 			d.openModelPicker()
 		}
 		out = d.modelPicker.Render(th, width)
-		out = append(out, "  "+th.FG256(th.Muted, "select model for next spawn · esc to cancel"))
+		out = append(out, "  "+th.FG256(th.Muted, "select model for next spawn, esc to cancel"))
 		return out
 	}
 	if d.spawning {
@@ -998,7 +998,7 @@ func (d *swarmDialog) Render(th tui.Theme, width int) []string {
 		// Matching blank row below before the hint, mirroring the
 		// main input's editor breathing room.
 		out = append(out, "")
-		out = append(out, "  "+th.FG256(th.Muted, "enter spawn · /model pick model · @ file/dir picker · paste/drop paths become [file:] / [dir:] chips · esc cancel"))
+		out = append(out, "  "+th.FG256(th.Muted, "enter spawn, /model pick model, @ file/dir picker, paste/drop paths become [file:] / [dir:] chips, esc cancel"))
 		out = append(out, frameRule(th, width))
 		return out
 	}
@@ -1031,11 +1031,11 @@ func (d *swarmDialog) renderTranscript(th tui.Theme, width int) []string {
 		return d.Render(th, width)
 	}
 	header := []string{
-		frameHeader(th, "swarm: "+a.ID+"  (type to send · esc back)", width),
+		frameHeader(th, "swarm: "+a.ID+"  (type to send, esc back)", width),
 		"  " + th.FG256(th.Muted, "task:   "+a.Task),
 		"  " + th.FG256(th.Muted, "branch: "+a.Branch),
 		"  " + th.FG256(th.Muted, "dir:    "+a.Dir),
-		"  " + th.FG256(th.Muted, fmt.Sprintf("status: %s · %s", a.Status, a.Activity)),
+		"  " + th.FG256(th.Muted, fmt.Sprintf("status: %s, %s", a.Status, a.Activity)),
 	}
 	if a.Model != "" {
 		modelLine := "model:  " + a.Model
@@ -1135,7 +1135,7 @@ func (d *swarmDialog) appendTranscriptEditor(out []string, th tui.Theme, width i
 			d.transcriptSpin.Start()
 		}
 		out = append(out, "")
-		prefix := fmt.Sprintf("%s %s · %s",
+		prefix := fmt.Sprintf("%s %s, %s",
 			th.FG256(th.Assistant, d.transcriptSpin.Frame()),
 			th.FG256(th.Assistant, a.Activity),
 			th.FG256(th.Muted, d.transcriptSpin.Elapsed().String()),
@@ -1153,7 +1153,7 @@ func (d *swarmDialog) appendTranscriptEditor(out []string, th tui.Theme, width i
 		out = append(out, "  "+l)
 	}
 	out = append(out, "")
-	out = append(out, "  "+th.FG256(th.Muted, "enter send · @ file/dir picker · esc back"))
+	out = append(out, "  "+th.FG256(th.Muted, "enter send, @ file/dir picker, esc back"))
 	return out
 }
 
@@ -1315,7 +1315,7 @@ func (d *swarmDialog) renderPromptEditor(th tui.Theme, width int, out []string) 
 	}
 	// Matching blank row below before the hint.
 	out = append(out, "")
-	out = append(out, "  "+th.FG256(th.Muted, "enter send · @ file/dir picker · esc cancel"))
+	out = append(out, "  "+th.FG256(th.Muted, "enter send, @ file/dir picker, esc cancel"))
 	out = append(out, frameRule(th, width))
 	return out
 }

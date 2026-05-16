@@ -179,7 +179,7 @@ func TestReloadReplaysTranscriptFromEventLog(t *testing.T) {
 	m := agentMeta{
 		ID: id, Task: "do thing", Branch: "swarm/alpha-9",
 		Dir: filepath.Join(root, "wt", id), Started: time.Now().Add(-time.Hour),
-		InboxPath: filepath.Join(stateDir, "in.sock"),
+		InboxPath:    filepath.Join(stateDir, "in.sock"),
 		EventLogPath: filepath.Join(stateDir, "events.jsonl"),
 		SessionPath:  filepath.Join(stateDir, "session.json"),
 	}
@@ -606,11 +606,11 @@ func TestStopOnDetachedAgentIsNoopAndDoesNotPanic(t *testing.T) {
 	}
 	m := agentMeta{
 		ID: id, Task: "t", Branch: "swarm/" + id,
-		Dir: filepath.Join(root, "wt", id),
-		Started: time.Now().Add(-time.Hour),
-		InboxPath: filepath.Join(stateDir, "in.sock"),
+		Dir:          filepath.Join(root, "wt", id),
+		Started:      time.Now().Add(-time.Hour),
+		InboxPath:    filepath.Join(stateDir, "in.sock"),
 		EventLogPath: filepath.Join(stateDir, "events.jsonl"),
-		SessionPath: filepath.Join(stateDir, "session.json"),
+		SessionPath:  filepath.Join(stateDir, "session.json"),
 	}
 	mb, _ := json.MarshalIndent(m, "", "  ")
 	if err := os.WriteFile(filepath.Join(stateDir, "meta.json"), mb, 0o644); err != nil {

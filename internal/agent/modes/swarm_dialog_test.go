@@ -1074,7 +1074,7 @@ func TestSwarmTranscriptGrowsWithNewMessages(t *testing.T) {
 	// both the new content AND keep the old content (no clipping).
 	cur = []swarm.AgentSnapshot{{
 		ID: "agent-1", Task: "x", Status: swarm.StatusRunning,
-		Lines: []string{"old line 1", "old line 2", "new reply A", "new reply B"},
+		Lines:   []string{"old line 1", "old line 2", "new reply A", "new reply B"},
 		Started: cur[0].Started,
 	}}
 	out = strings.Join(d.Render(tui.Theme{}, 80), "\n")
@@ -1262,7 +1262,7 @@ func TestSwarmTranscriptBusySpinnerRenders(t *testing.T) {
 		t.Error("spinner stayed live after agent reported idle")
 	}
 	// The bare word "thinking" must not appear anymore.
-	if strings.Contains(out, "· thinking ·") {
+	if strings.Contains(out, "· thinking, ") {
 		t.Errorf("busy line still rendered when agent is idle:\n%s", out)
 	}
 }

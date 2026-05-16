@@ -28,10 +28,10 @@ import (
 // stat the file size and read from their last offset on every
 // poll.
 type Event struct {
-	Time time.Time              `json:"time"`
-	Type string                 `json:"type"`
-	Data map[string]any         `json:"-"`
-	Raw  map[string]any         `json:"-"` // includes type+time+data for replay
+	Time time.Time      `json:"time"`
+	Type string         `json:"type"`
+	Data map[string]any `json:"-"`
+	Raw  map[string]any `json:"-"` // includes type+time+data for replay
 }
 
 // MarshalJSON flattens Data into the top-level object so consumers

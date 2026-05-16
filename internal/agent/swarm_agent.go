@@ -11,8 +11,8 @@ import (
 
 	"github.com/patriceckhart/zot/internal/agent/modes"
 	"github.com/patriceckhart/zot/internal/core"
-	"github.com/patriceckhart/zot/internal/swarm"
 	"github.com/patriceckhart/zot/internal/provider"
+	"github.com/patriceckhart/zot/internal/swarm"
 )
 
 // runSwarmAgentMode is the daemon-mode entry point used by every
@@ -85,12 +85,12 @@ func runSwarmAgentMode(ctx context.Context, args Args, version string) error {
 	// cancel so the "cancel" inbox message can interrupt an
 	// in-flight turn without tearing down the whole daemon.
 	var (
-		mu        sync.Mutex
-		turnCtx   context.Context = ctx
-		cancelFn  context.CancelFunc
-		busyTurn  bool
-		turnNo    int
-		shutdown  = make(chan struct{})
+		mu       sync.Mutex
+		turnCtx  context.Context = ctx
+		cancelFn context.CancelFunc
+		busyTurn bool
+		turnNo   int
+		shutdown = make(chan struct{})
 	)
 
 	runOne := func(prompt string) {
