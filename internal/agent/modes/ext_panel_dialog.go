@@ -1,7 +1,10 @@
 package modes
 
 import (
+	"fmt"
 	"strings"
+
+	"github.com/mattn/go-runewidth"
 
 	"github.com/patriceckhart/zot/internal/tui"
 )
@@ -56,14 +59,31 @@ func (d *extPanelDialog) Render(th tui.Theme, width int) []string {
 	if title == "" {
 		title = d.ext
 	}
-	out := []string{frameHeader(th, title, width)}
+	out := []string{frameHeaderColor(th, title, width, th.Accent)}
 	for _, l := range d.lines {
-		out = append(out, l)
+		plain := stripANSIBytes(l)
+		trimmed := strings.TrimLeft(plain, " ")
+		selected := strings.HasPrefix(trimmed, "▸ ") || strings.HasPrefix(trimmed, "● ")
+		out = append(out, styleExtPanelLine(th, plain, width, selected))
 	}
 	if strings.TrimSpace(d.footer) != "" {
 		out = append(out, "")
 		out = append(out, th.FG256(th.Muted, d.footer))
 	}
-	out = append(out, frameRule(th, width))
+	out = append(out, frameRuleColor(th, width, th.Accent))
 	return out
+}
+
+func styleExtPanelLine(th tui.Theme, plain string, width int, selected bool) string {
+	if selected {
+		if visible := runewidth.StringWidth(plain); visible < width {
+			plain += strings.Repeat(" ", width-visible)
+		}
+		base := fmt.Sprintf("\x1b[38;5;%dm\x1b[48;5;%dm", th.SelectionFG, th.SelectionBG)
+		green := fmt.Sprintf("\x1b[38;5;%dm\x1b[48;5;%dm", th.Tool, th.SelectionBG)
+		return base + strings.ReplaceAll(plain, "✓", green+"✓"+base) + "\x1b[0m"
+	}
+	styled := th.FG256(th.Muted, plain)
+	styled = strings.ReplaceAll(styled, "✓", th.FG256(th.Tool, "✓"))
+	return styled
 }
