@@ -64,7 +64,7 @@ func (d *extPanelDialog) Render(th tui.Theme, width int) []string {
 		plain := stripANSIBytes(l)
 		trimmed := strings.TrimLeft(plain, " ")
 		selected := strings.HasPrefix(trimmed, "▸ ") || strings.HasPrefix(trimmed, "● ")
-		out = append(out, styleExtPanelLine(th, plain, width, selected))
+		out = append(out, styleExtPanelLine(th, l, plain, width, selected))
 	}
 	if strings.TrimSpace(d.footer) != "" {
 		out = append(out, "")
@@ -74,7 +74,7 @@ func (d *extPanelDialog) Render(th tui.Theme, width int) []string {
 	return out
 }
 
-func styleExtPanelLine(th tui.Theme, plain string, width int, selected bool) string {
+func styleExtPanelLine(th tui.Theme, raw string, plain string, width int, selected bool) string {
 	if selected {
 		if visible := runewidth.StringWidth(plain); visible < width {
 			plain += strings.Repeat(" ", width-visible)
@@ -82,6 +82,9 @@ func styleExtPanelLine(th tui.Theme, plain string, width int, selected bool) str
 		base := fmt.Sprintf("\x1b[38;5;%dm\x1b[48;5;%dm", th.SelectionFG, th.SelectionBG)
 		green := fmt.Sprintf("\x1b[38;5;%dm\x1b[48;5;%dm", th.Tool, th.SelectionBG)
 		return base + strings.ReplaceAll(plain, "✓", green+"✓"+base) + "\x1b[0m"
+	}
+	if raw != plain {
+		return raw + "\x1b[0m"
 	}
 	styled := th.FG256(th.Muted, plain)
 	styled = strings.ReplaceAll(styled, "✓", th.FG256(th.Tool, "✓"))
