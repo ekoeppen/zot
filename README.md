@@ -190,7 +190,7 @@ Type `/` in the TUI to open the autocomplete popup. Available commands:
 | `/swarm` | Spawn, monitor, and chat with background subagents. Each runs in parallel with your main session and shares its working directory. |
 | `/skills` | List discovered skills (SKILL.md files) and preview their bodies. |
 | `/compact` | Summarize the transcript into one message to free up context. |
-| `/study` | Run the canned prompt "Read and understand everything in the current directory." so the agent has full project context before you start asking targeted questions. |
+| `/study` | Run the canned prompt "Read and understand everything in the current directory." so the agent has full project context before you start asking targeted questions. Pass a path — typed, drag-dropped, or selected via `@` — to target a specific file or directory instead: `/study [dir:internal/]`, `/study cmd/zot/main.go`. |
 | `/jail` | Confine tools to the current directory. |
 | `/unjail` | Allow tools to touch paths outside again. |
 | `/reload-ext` | Hot-reload all extensions (re-read manifests, respawn subprocesses, rebuild tool registry). |

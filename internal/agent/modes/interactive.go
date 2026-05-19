@@ -2362,6 +2362,43 @@ func (i *Interactive) applySettingToggle(key string, value bool) {
 	}
 }
 
+// buildStudyPrompt returns the canned prompt the /study command
+// submits to the agent.
+//
+// With no argument, /study targets the current directory — the
+// historical behaviour. With an argument, /study targets that path
+// instead; either a directory ("read every file in here") or a
+// single file ("read this file"). The argument can be:
+//
+//   - a relative path (resolved against cwd)
+//   - an absolute path
+//   - an @-picker chip, which has already been expanded to an
+//     absolute path by expandFileChips before runSlash sees it
+//
+// The path is stat'd to pick the right wording ("directory" vs
+// "file"). If the path doesn't exist, we still build a sensible
+// prompt rather than erroring — the agent will surface the
+// missing-file failure itself when it tries to read it, which is
+// more useful than a refusal here.
+func buildStudyPrompt(arg, cwd string) string {
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		return "Read and understand everything in the current directory."
+	}
+	abs := arg
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(cwd, abs)
+	}
+	display := arg
+	if rel, err := filepath.Rel(cwd, abs); err == nil && !strings.HasPrefix(rel, "..") {
+		display = rel
+	}
+	if info, err := os.Stat(abs); err == nil && !info.IsDir() {
+		return "Read and understand the file " + display + "."
+	}
+	return "Read and understand everything in the directory " + display + "."
+}
+
 func (i *Interactive) runSlash(ctx context.Context, cmd string) (done bool) {
 	parts := strings.Fields(cmd)
 	switch parts[0] {
@@ -2432,11 +2469,16 @@ func (i *Interactive) runSlash(ctx context.Context, cmd string) (done bool) {
 		i.runCompact(ctx, false)
 	case "/study":
 		// Canned prompt that tells the agent to read every file
-		// in the current directory so its later turns have the
-		// whole project in context. Dispatched through the normal
-		// queue-or-start path so it behaves identically to
-		// typing the prompt by hand.
-		const studyPrompt = "Read and understand everything in the current directory."
+		// in some target so its later turns have the whole thing
+		// in context. With no argument, the target is the current
+		// directory. With an argument, the target is whatever the
+		// user passed — typed by hand, drag-dropped, or selected
+		// via the @ file picker (which is why we accept both files
+		// and directories; the @-picker chips for both have already
+		// been expanded to absolute paths by expandFileChips above).
+		// Dispatched through the normal queue-or-start path so it
+		// behaves identically to typing the prompt by hand.
+		studyPrompt := buildStudyPrompt(strings.TrimSpace(strings.TrimPrefix(cmd, parts[0])), i.cfg.CWD)
 		i.mu.Lock()
 		busy := i.busy
 		ag := i.agent
