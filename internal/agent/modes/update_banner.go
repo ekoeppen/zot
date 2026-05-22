@@ -2,7 +2,6 @@ package modes
 
 import (
 	"fmt"
-	"runtime"
 
 	"github.com/patriceckhart/zot/internal/tui"
 )
@@ -31,29 +30,19 @@ func renderUpdateBanner(th tui.Theme, info UpdateInfo, width int) []string {
 	out := []string{
 		frameHeaderColor(th, "update available", width, color),
 	}
+	out = append(out, "")
 
 	title := fmt.Sprintf("zot %s is available (you're on %s).", info.Latest, info.Current)
 	out = append(out, "  "+th.FG256(color, tui.Bold(title)))
-
-	cmd := recommendedUpdateCommand()
-	out = append(out, "  "+th.FG256(th.Muted, "run: ")+th.FG256(th.ToolOut, cmd))
+out = append(out, "")
+	out = append(out, "  "+th.FG256(th.Muted, "run: ")+th.FG256(color, "zot update"))
 
 	if info.URL != "" {
-		out = append(out, "  "+th.FG256(th.Muted, "changelog: "+info.URL))
+		out = append(out, "  "+th.FG256(th.Muted, "changelog: ")+th.FG256(color, info.URL))
 	}
 
+	out = append(out, "")
 	out = append(out, frameRuleColor(th, width, color))
 	out = append(out, "")
 	return out
-}
-
-// recommendedUpdateCommand returns the one-liner appropriate for the
-// user's platform. Points at www.zot.sh, which 301s to
-// the raw install scripts on github — same surface, stable short
-// URL that's safe to hard-code even if the scripts later move.
-func recommendedUpdateCommand() string {
-	if runtime.GOOS == "windows" {
-		return `iwr -useb https://www.zot.sh/install.ps1 | iex`
-	}
-	return `curl -fsSL https://www.zot.sh/install.sh | bash`
 }
