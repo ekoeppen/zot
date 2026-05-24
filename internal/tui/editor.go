@@ -161,9 +161,9 @@ func (e *Editor) HandleKey(k Key) (submit bool) {
 		// subsumed: a visual row above may also live in the
 		// previous logical line when a short line precedes a
 		// wrapped one.
-		e.moveCursorVisual(-1)
+		e.MoveVertical(-1)
 	case KeyDown:
-		e.moveCursorVisual(+1)
+		e.MoveVertical(+1)
 	case KeyHome, KeyCtrlA:
 		e.CursorC = 0
 	case KeyEnd, KeyCtrlE:
@@ -570,14 +570,17 @@ func (e *Editor) moveRight() {
 // (minus the target row's leading indent) to a rune index inside
 // that row's slice of its logical line. No-op at the top/bottom
 // edges of the whole buffer.
-func (e *Editor) moveCursorVisual(dir int) {
+// MoveVertical moves the cursor one visual row up/down through the
+// rendered editor layout. It returns true when the cursor moved, false
+// at the top/bottom edge. Callers can use false to fall back to outer
+// UI scrolling.
+func (e *Editor) MoveVertical(dir int) bool {
 	width := e.lastRenderWidth
 	if width <= 0 {
 		// Fall back to logical-line navigation if Render hasn't
 		// been called yet (shouldn't happen in practice; the
 		// host always renders once before accepting input).
-		e.moveCursorLogical(dir)
-		return
+		return e.moveCursorLogical(dir)
 	}
 
 	type vrow struct {
@@ -588,7 +591,11 @@ func (e *Editor) moveCursorVisual(dir int) {
 		leadPrefix string // the prefix used (prompt on row 0, indent on cont)
 	}
 
-	promptLen := visibleWidth(e.Prompt)
+	// Match Render's layout exactly: strip ANSI from the prompt before
+	// wrapping, otherwise escape bytes count as body runes and Up/Down
+	// lands in the wrong visual cell when the prompt is styled.
+	plainPrompt := stripANSI(e.Prompt)
+	promptLen := runewidth.StringWidth(plainPrompt)
 	indent := strings.Repeat(" ", promptLen)
 
 	var rows []vrow
@@ -596,7 +603,7 @@ func (e *Editor) moveCursorVisual(dir int) {
 	for r, line := range e.Lines {
 		prefix := indent
 		if r == 0 {
-			prefix = e.Prompt
+			prefix = plainPrompt
 		}
 		wrapped := wrapLine(prefix+line, width, indent)
 		lineRunes := []rune(line)
@@ -647,7 +654,7 @@ func (e *Editor) moveCursorVisual(dir int) {
 
 	target := curVRow + dir
 	if target < 0 || target >= len(rows) {
-		return
+		return false
 	}
 	tr := rows[target]
 	line := e.Lines[tr.logical]
@@ -676,23 +683,25 @@ func (e *Editor) moveCursorVisual(dir int) {
 	_ = bestW
 	e.CursorR = tr.logical
 	e.CursorC = tr.runeStart + best
+	return true
 }
 
 // moveCursorLogical is the pre-visual-navigation fallback used
 // when Render hasn't told us the terminal width yet. Walks the
 // e.Lines array directly.
-func (e *Editor) moveCursorLogical(dir int) {
+func (e *Editor) moveCursorLogical(dir int) bool {
 	switch {
 	case dir < 0 && e.CursorR > 0:
 		e.CursorR--
 	case dir > 0 && e.CursorR < len(e.Lines)-1:
 		e.CursorR++
 	default:
-		return
+		return false
 	}
 	if e.CursorC > runeLen(e.Lines[e.CursorR]) {
 		e.CursorC = runeLen(e.Lines[e.CursorR])
 	}
+	return true
 }
 
 func (e *Editor) deleteWord() {

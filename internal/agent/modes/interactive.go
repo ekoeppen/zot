@@ -1889,17 +1889,23 @@ func (i *Interactive) handleKey(ctx context.Context, k tui.Key) (done bool) {
 			}
 			i.mu.Unlock()
 		}
-		// Always use up/down for chat scrolling, even when the editor
-		// contains text. This makes keyboard scrolling consistent with
-		// a draft present at the cost of disabling vertical cursor
-		// motion inside the multi-line editor. Keep slash-popup
-		// navigation working by letting it intercept later when active.
+		// In multi-line / wrapped input, Up first moves inside the editor.
+		// At the editor's top edge it falls back to chat scrolling, preserving
+		// the old single-line scroll behavior.
 		if !i.suggest.Active(i.ed.Value()) && !i.fileSuggest.Active(i.ed.Value()) {
+			if i.ed.MoveVertical(-1) {
+				i.invalidate()
+				return false
+			}
 			i.scrollBy(+3)
 			return false
 		}
 	case tui.KeyDown:
 		if !i.suggest.Active(i.ed.Value()) && !i.fileSuggest.Active(i.ed.Value()) {
+			if i.ed.MoveVertical(+1) {
+				i.invalidate()
+				return false
+			}
 			if i.scrollOffset > 0 {
 				i.scrollBy(-3)
 			}
