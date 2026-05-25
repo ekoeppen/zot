@@ -17,6 +17,7 @@ import (
 
 	"github.com/patriceckhart/zot/internal/agent/extensions"
 	"github.com/patriceckhart/zot/internal/agent/modes"
+	"github.com/patriceckhart/zot/internal/agent/tools"
 	"github.com/patriceckhart/zot/internal/auth"
 	"github.com/patriceckhart/zot/internal/core"
 	"github.com/patriceckhart/zot/internal/extproto"
@@ -422,6 +423,45 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 	extToolAdapter := &extToolAdapter{mgr: extMgr}
 	r.MergeExtensionTools(extToolAdapter)
 
+	// Build the swarm supervisor BEFORE the agent so the auto-swarm
+	// tool can reference it during tool-registry construction. State
+	// lives under ZotHome/swarm so per-agent meta/events survive
+	// restarts; the user can hunt orphaned agents down with
+	// `git worktree list` if anything misbehaves.
+	//
+	// swarmMgr is also captured by loadSession / changeCWD closures
+	// further down the function, which is why we keep the variable
+	// in this outer scope rather than scoping it tighter.
+	var swarmMgr *swarm.Swarm
+	swarmMgr = swarm.New(swarm.Config{
+		Root:     filepath.Join(ZotHome(), "swarm"),
+		RepoRoot: r.CWD,
+	})
+	// Pull any previously-spawned agents off disk so the dashboard
+	// shows them as detached and the user can resume / remove them.
+	_, _ = swarmMgr.Reload()
+
+	// Inject the swarm_spawn auto-swarm tool only when /settings ->
+	// auto-swarm is currently enabled. Registering it unconditionally
+	// leaves the model trying to call it (and getting a polite error)
+	// even when the user has switched the feature off. The /settings
+	// toggle live-mutates the running agent's registry separately so
+	// flipping the flag mid-session takes effect on the next turn.
+	injectSwarmSpawn := func(reg core.Registry) core.Registry {
+		if reg == nil {
+			return reg
+		}
+		if !AutoSwarmEnabled() {
+			return reg
+		}
+		reg["swarm_spawn"] = &tools.SwarmSpawnTool{
+			Swarm:   swarmMgr,
+			Enabled: AutoSwarmEnabled,
+		}
+		return reg
+	}
+	injectSwarmSpawn(r.ToolRegistry)
+
 	// Confirmation gate: when --no-yolo is on, the agent must ask
 	// the user before every tool call. In interactive mode the TUI
 	// provides the Confirmer; in print/json/rpc modes there's no
@@ -475,6 +515,7 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 		}
 		resolved.UseSandbox(sharedSandbox)
 		resolved.MergeExtensionTools(extToolAdapter)
+		injectSwarmSpawn(resolved.ToolRegistry)
 		return wireAgentExt(resolved.NewAgent()), resolved.Provider, resolved.Model, nil
 	}
 
@@ -493,6 +534,7 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 		}
 		resolved.UseSandbox(sharedSandbox)
 		resolved.MergeExtensionTools(extToolAdapter)
+		injectSwarmSpawn(resolved.ToolRegistry)
 		return wireAgentExt(resolved.NewAgent()), resolved.Provider, resolved.Model, nil
 	}
 
@@ -519,6 +561,7 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 		}
 		resolved.UseSandbox(sharedSandbox)
 		resolved.MergeExtensionTools(extToolAdapter)
+		injectSwarmSpawn(resolved.ToolRegistry)
 		return wireAgentExt(resolved.NewAgent()), resolved.Provider, resolved.Model, nil
 	}
 
@@ -544,6 +587,7 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 		}
 		resolved.UseSandbox(sharedSandbox)
 		resolved.MergeExtensionTools(extToolAdapter)
+		injectSwarmSpawn(resolved.ToolRegistry)
 		current.SetTools(resolved.ToolRegistry)
 	})
 
@@ -552,11 +596,6 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 
 	var sess *core.Session
 	var sessBaselineMsgs int // messages already on disk when current session opened
-	// swarmMgr is constructed below, but loadSession (defined before
-	// the construction site) needs to re-scope it whenever the user
-	// swaps sessions. Forward-declare here so the closure can
-	// reference it; the assignment happens at the construction line.
-	var swarmMgr *swarm.Swarm
 	// persistMu guards sess + sessBaselineMsgs against concurrent access
 	// from the agent loop's per-message persistence hook (runs on the
 	// agent goroutine) and the TUI's session swap / flush callbacks
@@ -861,18 +900,9 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 
 	initialCfg, _ := LoadConfig()
 
-	// Build the swarm supervisor. Root lives under ZotHome/swarm so
-	// worktrees survive across zot sessions and the user can hunt
-	// them down with `git worktree list` if anything misbehaves.
-	swarmMgr = swarm.New(swarm.Config{
-		Root:     filepath.Join(ZotHome(), "swarm"),
-		RepoRoot: r.CWD,
-	})
-	// Pull any previously-spawned agents off disk so the user can see,
-	// resume, or remove them from the dashboard. Failures here aren't
-	// fatal — the supervisor still works for new agents.
-	_, _ = swarmMgr.Reload()
-	// Scope the dashboard to the active host session so /swarm only
+	// swarmMgr was constructed and reloaded earlier (before the agent
+	// build, so the auto-swarm tool could capture it). Here we just
+	// scope the dashboard to the active host session so /swarm only
 	// shows agents this session spawned (and any pre-upgrade unscoped
 	// agents — see SnapshotAll docs). Updated again whenever the
 	// user swaps sessions via loadSession below.
@@ -887,6 +917,8 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 		Terminal:                   term,
 		Theme:                      tui.DetectThemeFromBackground(80 * time.Millisecond),
 		InlineImagesEnabled:        initialCfg.InlineImagesEnabled,
+		AutoSwarmEnabled:           initialCfg.AutoSwarmEnabled,
+		AutoSwarmSystemAddendum:    AutoSwarmSystemAddendum,
 		SettingsStore:              configSettingsStore{},
 		Model:                      r.Model,
 		Provider:                   r.Provider,

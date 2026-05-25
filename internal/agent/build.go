@@ -405,6 +405,9 @@ func Resolve(args Args, requireCred bool) (Resolved, error) {
 	if skillAddendum != "" {
 		append_ = append(append_, skillAddendum)
 	}
+	if AutoSwarmEnabled() {
+		append_ = append(append_, AutoSwarmSystemAddendum)
+	}
 
 	// Custom system prompt resolution order:
 	//   1. --system-prompt flag (highest priority; ad-hoc per run)

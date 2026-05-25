@@ -27,6 +27,11 @@ type Config struct {
 	// detected protocol when available.
 	InlineImagesEnabled *bool `json:"inline_images_enabled,omitempty"`
 
+	// AutoSwarmEnabled lets the main agent spawn background sub-agents
+	// for parallel sub-tasks via a built-in swarm_spawn tool. Off by
+	// default; nil/missing means disabled. Toggle from /settings.
+	AutoSwarmEnabled *bool `json:"auto_swarm_enabled,omitempty"`
+
 	// LastChangelogShown is the version whose release-notes
 	// dialog the user has already seen. When the running binary's
 	// version differs, the next interactive run shows the

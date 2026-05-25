@@ -39,7 +39,18 @@ type InteractiveConfig struct {
 	// auto-detect and render when supported; false disables; true uses
 	// the detected protocol when available.
 	InlineImagesEnabled *bool
-	SettingsStore       SettingsStore
+
+	// AutoSwarmEnabled mirrors the persisted config flag at startup so
+	// the /settings dialog can render the current state without
+	// re-reading config.json on every open.
+	AutoSwarmEnabled *bool
+
+	// AutoSwarmSystemAddendum is the system-prompt block that gets
+	// appended/stripped when the user toggles auto-swarm at runtime.
+	// Plumbed in from the cli so this package doesn't have to import
+	// agent (cycle).
+	AutoSwarmSystemAddendum string
+	SettingsStore           SettingsStore
 
 	// Agent is optional. If nil, zot opens without credentials; the
 	// user must /login before they can prompt.
@@ -209,6 +220,7 @@ type chatCacheKey struct {
 // SettingsStore persists user-toggleable settings surfaced by /settings.
 type SettingsStore interface {
 	SetInlineImages(enabled bool) error
+	SetAutoSwarm(enabled bool) error
 }
 
 type Interactive struct {
@@ -2470,17 +2482,49 @@ func (i *Interactive) openSettingsDialog() {
 	} else {
 		imgHint = "terminal supports " + imageProtocolName(detected)
 	}
-	i.settingsDialog.Open([]settingsItem{{
-		key:      "inline_images_enabled",
-		label:    "render images when supported",
-		desc:     "draw screenshots inline instead of showing a text placeholder",
-		value:    imgEnabled,
-		disabled: imgDisabled,
-		hint:     imgHint,
-	}})
+
+	autoSwarm := false
+	if i.cfg.AutoSwarmEnabled != nil {
+		autoSwarm = *i.cfg.AutoSwarmEnabled
+	}
+	autoSwarmDisabled := i.cfg.Swarm == nil
+	autoSwarmHint := ""
+	if autoSwarmDisabled {
+		autoSwarm = false
+		autoSwarmHint = "swarm supervisor not available in this mode"
+	}
+
+	i.settingsDialog.Open([]settingsItem{
+		{
+			key:      "inline_images_enabled",
+			label:    "render images when supported",
+			desc:     "draw screenshots inline instead of showing a text placeholder",
+			value:    imgEnabled,
+			disabled: imgDisabled,
+			hint:     imgHint,
+		},
+		{
+			key:      "auto_swarm_enabled",
+			label:    "auto-swarm",
+			desc:     "let the agent spawn background sub-agents in parallel via the swarm_spawn tool",
+			value:    autoSwarm,
+			disabled: autoSwarmDisabled,
+			hint:     autoSwarmHint,
+		},
+	})
 }
 
 func (i *Interactive) applySettingToggle(key string, value bool) {
+	// Every setting toggle forces a full repaint at the end — same
+	// effect as the user pressing Ctrl+L — so any per-setting visual
+	// change (image rendering, status copy, future toggles) lands
+	// immediately instead of waiting for the next diff frame.
+	defer func() {
+		if i.rend != nil {
+			i.rend.Clear()
+		}
+		i.invalidate()
+	}()
 	switch key {
 	case "inline_images_enabled":
 		val := value
@@ -2497,6 +2541,30 @@ func (i *Interactive) applySettingToggle(key string, value bool) {
 		i.view.ImageProto = effectiveImageProtocol(i.cfg.InlineImagesEnabled)
 		i.view.InvalidateRenderCache()
 		i.statusOK = "inline image rendering " + onOff(value)
+		i.statusErr = ""
+		i.mu.Unlock()
+	case "auto_swarm_enabled":
+		val := value
+		i.cfg.AutoSwarmEnabled = &val
+		if i.cfg.SettingsStore != nil {
+			if err := i.cfg.SettingsStore.SetAutoSwarm(value); err != nil {
+				i.mu.Lock()
+				i.statusErr = "settings: " + err.Error()
+				i.mu.Unlock()
+				return
+			}
+		}
+		// Add/remove the swarm_spawn tool on the live agent so the
+		// model's tools[] list reflects the toggle on the next turn.
+		// Without this the tool stays advertised after a disable and
+		// the model keeps trying to call it.
+		i.applyAutoSwarmTool(value)
+		// Also swap the system-prompt addendum in/out so the model
+		// knows to use the tool proactively (or stops referencing it
+		// after a disable).
+		i.applyAutoSwarmSystemPrompt(value)
+		i.mu.Lock()
+		i.statusOK = "auto-swarm " + onOff(value)
 		i.statusErr = ""
 		i.mu.Unlock()
 	}
@@ -2790,10 +2858,7 @@ func (i *Interactive) runSlash(ctx context.Context, cmd string) (done bool) {
 			i.modelDialog.Open(i.cfg.Model, loggedIn)
 		}
 	case "/settings":
-		i.mu.Lock()
-		i.statusErr = "/settings is temporarily disabled"
-		i.statusOK = ""
-		i.mu.Unlock()
+		i.openSettingsDialog()
 	case "/sessions":
 		i.sessionDialog.Open(i.cfg.ZotHome, i.cfg.CWD)
 	case "/jump":
@@ -4351,6 +4416,58 @@ func (a telegramSenderAdapter) SendDocument(ctx context.Context, path, caption s
 
 func (a telegramSenderAdapter) Active() bool {
 	return a.bridge != nil && a.bridge.Active()
+}
+
+// applyAutoSwarmSystemPrompt appends (active=true) or strips
+// (active=false) the auto-swarm system-prompt block on the running
+// agent so the model proactively considers swarm_spawn when the user
+// flips the toggle. The block lives at the tail of agent.System so
+// stripping is a plain suffix-trim; idempotent in both directions.
+func (i *Interactive) applyAutoSwarmSystemPrompt(active bool) {
+	if i.agent == nil {
+		return
+	}
+	addendum := i.cfg.AutoSwarmSystemAddendum
+	if addendum == "" {
+		return
+	}
+	sys := i.agent.System
+	has := strings.Contains(sys, addendum)
+	switch {
+	case active && !has:
+		if sys != "" && !strings.HasSuffix(sys, "\n\n") {
+			sys += "\n\n"
+		}
+		i.agent.System = sys + addendum
+	case !active && has:
+		i.agent.System = strings.TrimRight(strings.ReplaceAll(sys, addendum, ""), "\n") + "\n"
+	}
+}
+
+// applyAutoSwarmTool registers (active=true) or removes (active=false)
+// the swarm_spawn tool on the running agent so the model only sees it
+// when /settings -> auto-swarm is enabled. Mirrors applyTelegramTools'
+// snapshot+mutate pattern so extension tools and /reload-ext additions
+// survive a toggle.
+func (i *Interactive) applyAutoSwarmTool(active bool) {
+	if i.agent == nil {
+		return
+	}
+	current := i.agent.Tools
+	next := core.Registry{}
+	for name, t := range current {
+		if name == "swarm_spawn" {
+			continue
+		}
+		next[name] = t
+	}
+	if active && i.cfg.Swarm != nil {
+		next["swarm_spawn"] = &tools.SwarmSpawnTool{
+			Swarm:   i.cfg.Swarm,
+			Enabled: func() bool { return true },
+		}
+	}
+	i.agent.SetTools(next)
 }
 
 // applyTelegramTools registers (active=true) or removes (active=false)
