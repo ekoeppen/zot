@@ -249,10 +249,18 @@ func (c *anthropicClient) buildRequest(req Request) (*anthRequest, error) {
 	if req.Reasoning != "" && m.Reasoning {
 		budget := anthropicReasoningBudget(req.Reasoning)
 		if budget > 0 {
+			// Reasoning requires max_tokens > budget. Keep at least a small
+			// answer budget while respecting the model's advertised output cap.
+			const minAnswerTokens = 1024
+			if m.MaxOutput > minAnswerTokens && budget >= m.MaxOutput {
+				budget = m.MaxOutput - minAnswerTokens
+			}
 			out.Thinking = &anthThinking{Type: "enabled", BudgetTokens: budget}
-			// Reasoning requires max_tokens > budget.
 			if out.MaxTokens <= budget {
-				out.MaxTokens = budget + 4096
+				out.MaxTokens = budget + minAnswerTokens
+				if m.MaxOutput > 0 && out.MaxTokens > m.MaxOutput {
+					out.MaxTokens = m.MaxOutput
+				}
 			}
 		}
 	}
@@ -361,16 +369,7 @@ func markLastBlockEphemeral(blocks []interface{}) {
 }
 
 func anthropicReasoningBudget(level string) int {
-	switch strings.ToLower(level) {
-	case "low":
-		return 2048
-	case "medium":
-		return 8192
-	case "high":
-		return 16384
-	default:
-		return 0
-	}
+	return ReasoningBudget(level)
 }
 
 func filterAnthAssistantContent(blocks []Content) []Content {

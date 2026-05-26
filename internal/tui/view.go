@@ -1973,6 +1973,7 @@ type StatusBarParams struct {
 	Theme      Theme
 	Provider   string
 	Model      string
+	Reasoning  string // "" means thinking off
 	Busy       bool
 	BusyPrefix string // spinner + funny line when busy
 	CWD        string
@@ -2069,7 +2070,20 @@ func StatusBar(p StatusBarParams) []string {
 	const pad = "  " // 2 spaces
 
 	left := fmt.Sprintf("(%s) %s", p.Provider, p.Model)
-	middle := strings.Join(stats, " ")
+	thinking := thinkingLevelLabel(p.Reasoning)
+	thinkingText := ""
+	if thinking != "" {
+		thinkingText = "thinking: " + thinking
+	}
+	statsText := strings.Join(stats, " ")
+	middleParts := make([]string, 0, 2)
+	if thinkingText != "" {
+		middleParts = append(middleParts, thinkingText)
+	}
+	if statsText != "" {
+		middleParts = append(middleParts, statsText)
+	}
+	middle := strings.Join(middleParts, "  ")
 
 	var leftBuilder strings.Builder
 	if p.BusyPrefix != "" {
@@ -2122,8 +2136,7 @@ func StatusBar(p StatusBarParams) []string {
 		modelLine := pad + th.FG256(th.Muted, left)
 		lines := []string{busyLine}
 		if middle != "" && visibleWidth(modelLine+pad+th.FG256(th.Muted, middle)) > p.Cols {
-			lines = append(lines, modelLine)
-			lines = append(lines, pad+th.FG256(th.Muted, middle))
+			lines = appendWrappedStatusLines(lines, th, pad, left, thinkingText, statsText, p.Cols)
 		} else {
 			var infoBuilder strings.Builder
 			infoBuilder.WriteString(modelLine)
@@ -2144,10 +2157,8 @@ func StatusBar(p StatusBarParams) []string {
 	// avoids the terminal's hard wrap cutting the stats or pushing cwd
 	// into an awkward position on small widths.
 	if p.Cols > 0 && p.BusyPrefix == "" && middle != "" && visibleWidth(primary) > p.Cols {
-		lines := []string{
-			pad + th.FG256(th.Muted, left),
-			pad + th.FG256(th.Muted, middle),
-		}
+		var lines []string
+		lines = appendWrappedStatusLines(lines, th, pad, left, thinkingText, statsText, p.Cols)
 		if cwd != "" {
 			lines = append(lines, pad+th.FG256(th.Muted, cwd))
 		}
@@ -2162,6 +2173,42 @@ func StatusBar(p StatusBarParams) []string {
 	// up under the "(provider)" column on line 1.
 	cwdRendered := pad + th.FG256(th.Muted, cwd)
 	return []string{primary, cwdRendered}
+}
+
+func appendWrappedStatusLines(lines []string, th Theme, pad, modelText, thinkingText, statsText string, cols int) []string {
+	modelLine := pad + th.FG256(th.Muted, modelText)
+	if thinkingText == "" {
+		lines = append(lines, modelLine)
+		if statsText != "" {
+			lines = append(lines, pad+th.FG256(th.Muted, statsText))
+		}
+		return lines
+	}
+
+	modelThinkingPlain := pad + modelText + pad + thinkingText
+	if cols <= 0 || visibleWidth(modelThinkingPlain) <= cols {
+		lines = append(lines, pad+th.FG256(th.Muted, modelText+pad+thinkingText))
+	} else {
+		lines = append(lines, modelLine)
+		lines = append(lines, pad+th.FG256(th.Muted, thinkingText))
+	}
+	if statsText != "" {
+		lines = append(lines, pad+th.FG256(th.Muted, statsText))
+	}
+	return lines
+}
+
+func thinkingLevelLabel(level string) string {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "", "off", "none", "no", "false", "disabled":
+		return ""
+	case "minimum", "minimal", "min":
+		return "minimal"
+	case "maximum", "max", "xhigh":
+		return "maximum"
+	default:
+		return strings.ToLower(strings.TrimSpace(level))
+	}
 }
 
 // contextUsage renders the "N%/ctxMax" fragment, returning the

@@ -264,7 +264,9 @@ func TestGeminiThinkingConfig(t *testing.T) {
 		{"gemini-3-pro", "low", "LOW", 0},
 		{"gemini-3-pro", "medium", "HIGH", 0}, // Pro can't go below LOW; medium → HIGH
 		{"gemini-3-flash", "medium", "MEDIUM", 0},
-		{"gemini-2.5-pro", "high", "", 32768},
+		{"gemini-2.5-pro", "high", "", 16384},
+		{"gemini-2.5-pro", "maximum", "", 32768},
+		{"gemini-2.5-flash", "minimum", "", 1024},
 		{"gemini-2.5-flash", "low", "", 2048},
 		{"gemini-2.0-flash", "high", "", 0}, // 2.0 has no thinking → nil
 	}

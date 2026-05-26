@@ -1,5 +1,7 @@
 package agent
 
+import "github.com/patriceckhart/zot/internal/provider"
+
 type configSettingsStore struct{}
 
 func (configSettingsStore) SetInlineImages(enabled bool) error {
@@ -17,6 +19,15 @@ func (configSettingsStore) SetAutoSwarm(enabled bool) error {
 		return err
 	}
 	cfg.AutoSwarmEnabled = &enabled
+	return SaveConfig(cfg)
+}
+
+func (configSettingsStore) SetReasoning(level string) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	cfg.Reasoning = provider.NormalizeReasoning(level)
 	return SaveConfig(cfg)
 }
 

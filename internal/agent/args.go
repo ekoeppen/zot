@@ -196,10 +196,10 @@ func ParseArgs(in []string) (Args, error) {
 				return a, err
 			}
 			switch strings.ToLower(v) {
-			case "", "low", "medium", "high":
+			case "", "off", "minimum", "minimal", "low", "medium", "high", "maximum", "max":
 				a.Reasoning = strings.ToLower(v)
 			default:
-				return a, fmt.Errorf("--reasoning must be low|medium|high")
+				return a, fmt.Errorf("--reasoning must be off|minimum|low|medium|high|maximum")
 			}
 		case "--session":
 			v, err := want(&i, arg)
@@ -360,7 +360,7 @@ func PrintHelp(version string) {
 		row{"--model ID", "model id (see --list-models)"},
 		row{"--api-key KEY", "api key for this run (env / auth.json fallback)"},
 		row{"--base-url URL", "override provider api base url"},
-		row{"--reasoning low|medium|high", "enable reasoning on supported models"},
+		row{"--reasoning off|minimum|low|medium|high|maximum", "set thinking level on supported models"},
 	)
 	section("prompt and session flags",
 		row{"--system-prompt TEXT", "replace the default system prompt"},

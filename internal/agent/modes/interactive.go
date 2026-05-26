@@ -221,6 +221,7 @@ type chatCacheKey struct {
 type SettingsStore interface {
 	SetInlineImages(enabled bool) error
 	SetAutoSwarm(enabled bool) error
+	SetReasoning(level string) error
 }
 
 type Interactive struct {
@@ -1065,6 +1066,7 @@ func (i *Interactive) redraw() {
 		Theme:          i.cfg.Theme,
 		Provider:       i.cfg.Provider,
 		Model:          i.cfg.Model,
+		Reasoning:      i.cfg.Reasoning,
 		Busy:           i.busy,
 		BusyPrefix:     busyPrefix,
 		CWD:            i.cfg.CWD,
@@ -1662,7 +1664,7 @@ func (i *Interactive) handleKey(ctx context.Context, k tui.Key) (done bool) {
 		}
 		act := i.settingsDialog.HandleKey(k)
 		if act.Toggle {
-			i.applySettingToggle(act.Key, act.Value)
+			i.applySettingChange(act)
 		}
 		i.invalidate()
 		return false
@@ -2503,6 +2505,27 @@ func (i *Interactive) openSettingsDialog() {
 		autoSwarmHint = "swarm supervisor not available in this mode"
 	}
 
+	reasoningOptions := []settingsOption{
+		{value: "", label: "off", desc: "no reasoning"},
+		{value: "minimum", label: "minimum", desc: "very brief (~1k tokens)"},
+		{value: "low", label: "low", desc: "light (~2k tokens)"},
+		{value: "medium", label: "medium", desc: "moderate (~8k tokens)"},
+		{value: "high", label: "high", desc: "deep (~16k tokens)"},
+		{value: "maximum", label: "maximum", desc: "highest (~32k tokens)"},
+	}
+	reasoning := provider.NormalizeReasoning(i.cfg.Reasoning)
+	reasoningChoice := 0
+	for idx, opt := range reasoningOptions {
+		if opt.value == reasoning {
+			reasoningChoice = idx
+			break
+		}
+	}
+	reasoningHint := ""
+	if m, err := provider.FindModel(i.cfg.Provider, i.cfg.Model); err == nil && !m.Reasoning {
+		reasoningHint = "current model does not support thinking"
+	}
+
 	i.settingsDialog.Open([]settingsItem{
 		{
 			key:      "inline_images_enabled",
@@ -2520,7 +2543,23 @@ func (i *Interactive) openSettingsDialog() {
 			disabled: autoSwarmDisabled,
 			hint:     autoSwarmHint,
 		},
+		{
+			key:     "reasoning",
+			label:   "thinking level",
+			desc:    "reasoning depth for thinking-capable models",
+			options: reasoningOptions,
+			choice:  reasoningChoice,
+			hint:    reasoningHint,
+		},
 	})
+}
+
+func (i *Interactive) applySettingChange(act settingsAction) {
+	if act.Key == "reasoning" {
+		i.applyReasoningSetting(act.StringValue)
+		return
+	}
+	i.applySettingToggle(act.Key, act.Value)
 }
 
 func (i *Interactive) applySettingToggle(key string, value bool) {
@@ -2577,6 +2616,36 @@ func (i *Interactive) applySettingToggle(key string, value bool) {
 		i.statusErr = ""
 		i.mu.Unlock()
 	}
+}
+
+func (i *Interactive) applyReasoningSetting(level string) {
+	defer func() {
+		if i.rend != nil {
+			i.rend.Clear()
+		}
+		i.invalidate()
+	}()
+	level = provider.NormalizeReasoning(level)
+	i.cfg.Reasoning = level
+	if i.cfg.SettingsStore != nil {
+		if err := i.cfg.SettingsStore.SetReasoning(level); err != nil {
+			i.mu.Lock()
+			i.statusErr = "settings: " + err.Error()
+			i.mu.Unlock()
+			return
+		}
+	}
+	i.mu.Lock()
+	if i.agent != nil {
+		i.agent.Reasoning = level
+	}
+	label := level
+	if label == "" {
+		label = "off"
+	}
+	i.statusOK = "thinking level " + label
+	i.statusErr = ""
+	i.mu.Unlock()
 }
 
 // buildStudyPrompt returns the canned prompt the /study command

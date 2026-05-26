@@ -354,7 +354,7 @@ func convertGemToolResultParts(blocks []Content) []gemPart {
 // generation: 2.5 family uses thinkingBudget (tokens), 3.x uses
 // thinkingLevel (enum). Returns nil when the level is unrecognised.
 func geminiThinkingConfig(modelID, level string) *gemThinkingConfig {
-	level = strings.ToLower(level)
+	level = NormalizeReasoning(level)
 	id := strings.ToLower(modelID)
 
 	// Gemini 3.x: enum-based thinkingLevel. Pro can't go below LOW.
@@ -362,6 +362,12 @@ func geminiThinkingConfig(modelID, level string) *gemThinkingConfig {
 		isPro := strings.Contains(id, "-pro")
 		var lvl string
 		switch level {
+		case "minimum":
+			if isPro {
+				lvl = "LOW"
+			} else {
+				lvl = "MINIMAL"
+			}
 		case "low":
 			lvl = "LOW"
 		case "medium":
@@ -370,7 +376,7 @@ func geminiThinkingConfig(modelID, level string) *gemThinkingConfig {
 			} else {
 				lvl = "MEDIUM"
 			}
-		case "high":
+		case "high", "maximum":
 			lvl = "HIGH"
 		default:
 			return nil
@@ -379,33 +385,18 @@ func geminiThinkingConfig(modelID, level string) *gemThinkingConfig {
 	}
 
 	// Gemini 2.5 family: token-budget per-model.
-	var budget int
+	budget := ReasoningBudget(level)
 	switch {
 	case strings.Contains(id, "2.5-pro"):
-		switch level {
-		case "low":
-			budget = 2048
-		case "medium":
-			budget = 8192
-		case "high":
+		if budget > 32768 {
 			budget = 32768
 		}
 	case strings.Contains(id, "2.5-flash-lite"):
-		switch level {
-		case "low":
-			budget = 2048
-		case "medium":
-			budget = 8192
-		case "high":
+		if budget > 24576 {
 			budget = 24576
 		}
 	case strings.Contains(id, "2.5-flash"):
-		switch level {
-		case "low":
-			budget = 2048
-		case "medium":
-			budget = 8192
-		case "high":
+		if budget > 24576 {
 			budget = 24576
 		}
 	default:

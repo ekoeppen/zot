@@ -131,16 +131,21 @@ type codexTool struct {
 	Parameters  json.RawMessage `json:"parameters"`
 }
 
+type codexReasoningConfig struct {
+	Effort string `json:"effort,omitempty"`
+}
+
 type codexRequest struct {
-	Model             string      `json:"model"`
-	Store             bool        `json:"store"`
-	Stream            bool        `json:"stream"`
-	Instructions      string      `json:"instructions,omitempty"`
-	Input             []any       `json:"input"`
-	Tools             []codexTool `json:"tools,omitempty"`
-	ToolChoice        string      `json:"tool_choice,omitempty"`
-	ParallelToolCalls bool        `json:"parallel_tool_calls"`
-	Include           []string    `json:"include,omitempty"`
+	Model             string                `json:"model"`
+	Store             bool                  `json:"store"`
+	Stream            bool                  `json:"stream"`
+	Instructions      string                `json:"instructions,omitempty"`
+	Input             []any                 `json:"input"`
+	Tools             []codexTool           `json:"tools,omitempty"`
+	ToolChoice        string                `json:"tool_choice,omitempty"`
+	ParallelToolCalls bool                  `json:"parallel_tool_calls"`
+	Include           []string              `json:"include,omitempty"`
+	Reasoning         *codexReasoningConfig `json:"reasoning,omitempty"`
 }
 
 // ---- Request building ----
@@ -162,6 +167,11 @@ func (c *codexClient) buildRequest(req Request) (*codexRequest, error) {
 		Instructions:      req.System,
 		ParallelToolCalls: true,
 		Include:           []string{"reasoning.encrypted_content"},
+	}
+	if m.Reasoning {
+		if effort := OpenAICodexReasoningEffort(req.Reasoning); effort != "" {
+			body.Reasoning = &codexReasoningConfig{Effort: effort}
+		}
 	}
 	if len(req.Tools) > 0 {
 		body.ToolChoice = "auto"

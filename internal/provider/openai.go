@@ -185,8 +185,8 @@ func (c *openaiClient) buildRequest(req Request) (*oaiRequest, error) {
 	}
 	if m.Reasoning {
 		out.MaxCompletionTok = &maxTok
-		if req.Reasoning != "" {
-			out.ReasoningEffort = strings.ToLower(req.Reasoning)
+		if effort := OpenAIReasoningEffort(req.Reasoning); effort != "" {
+			out.ReasoningEffort = effort
 		}
 	} else {
 		out.MaxTokens = &maxTok

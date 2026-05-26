@@ -426,7 +426,7 @@ func Resolve(args Args, requireCred bool) (Resolved, error) {
 		ZotDocsDir: docsDir,
 	})
 
-	reasoning := firstNonEmpty(args.Reasoning, cfg.Reasoning)
+	reasoning := provider.NormalizeReasoning(firstNonEmpty(args.Reasoning, cfg.Reasoning))
 
 	max := args.MaxSteps // 0 = unlimited
 

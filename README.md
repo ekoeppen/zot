@@ -141,7 +141,7 @@ zot --help
 | `--base-url <url>` | Override the provider base URL (tests, self-hosted). |
 | `--system-prompt <text>` | Replace the default system prompt for this run (also overrides `$ZOT_HOME/SYSTEM.md`). |
 | `--append-system-prompt <text>` | Append text to the system prompt (repeatable). |
-| `--reasoning low\|medium\|high` | Enable reasoning on supported models. |
+| `--reasoning off\|minimum\|low\|medium\|high\|maximum` | Set thinking level on supported models. |
 | `-c`, `--continue` | Resume the latest session for this cwd. |
 | `-r`, `--resume` | Pick a session to resume. |
 | `--session <path>` | Resume a specific session file. |
@@ -290,10 +290,11 @@ Background subagents that run alongside your main session. Each one is a separat
 
 ### `/settings`
 
-Opens a dialog with every persistent toggle. `up`/`down` to navigate, `enter` or `space` to flip the selected row, `esc` to close. Changes are written to `$ZOT_HOME/config.json` and take effect on the next turn (no restart needed). Current toggles:
+Opens a dialog with every persistent setting. `up`/`down` to navigate, `enter` or `space` to change the selected row, `esc` to close. Changes are written to `$ZOT_HOME/config.json` and take effect on the next turn (no restart needed). Current settings:
 
 - **render images when supported** — draw screenshots / `read`-returned images inline using the terminal's image protocol, or fall back to a text placeholder. Auto-detected from `TERM_PROGRAM`; the toggle overrides the detection. The row is greyed out and forced off on terminals that don't speak any image protocol.
 - **auto-swarm** — let the main agent spawn background sub-agents in parallel via a built-in `swarm_spawn` tool. Off by default. When on, the tool is registered with the running agent, the system prompt gains a short addendum telling the model to delegate independent sub-tasks proactively, and zot watches every sub-agent the main agent spawns. As soon as the last sub-agent in a batch finishes its initial task, an `[auto-swarm update]` message is injected back into the chat with each agent's status / task / transcript tail, so the main agent can summarise the collective outcome. Flipping off mid-session removes the tool from the live agent and strips the addendum on the next turn — the model stops trying to delegate. See `/swarm` for the dashboard that lets you monitor, message, kill, or remove the spawned agents.
+- **thinking level** — choose reasoning for supported models: off (no reasoning), minimum (~1k tokens), low (~2k), medium (~8k), high (~16k), maximum (~32k). The change is persisted to `config.json` and applied to the running agent's next model call.
 
 ### `/skills`
 
@@ -468,7 +469,7 @@ Use `/login` and pick **api key** to paste an AI Studio key. zot probes `/v1beta
 
 > **Free-tier rate limits.** AI Studio's free tier has tight per-minute and per-day caps that vary by model: `gemini-2.5-pro` is the strictest (a few requests per minute, ~50 per day), Flash and Flash-Lite are far more generous. If a Pro turn 429s with `"You exceeded your current quota"` while Flash on the same key still works, you've hit the Pro free-tier RPD. Either switch to Flash for agent loops, or [enable billing](https://aistudio.google.com/app/apikey) on your AI Studio project to flip the same key from free to pay-as-you-go pricing (`$1.25/M` input, `$10/M` output for Pro).
 
-Reasoning levels (`--reasoning low|medium|high`) map differently per generation: 2.5 family uses `thinkingBudget` token budgets per model (Pro caps at 32k, Flash at 24k); Gemini 3.x uses the `thinkingLevel` enum (`MINIMAL`/`LOW`/`MEDIUM`/`HIGH`), with Gemini-3-Pro pinned to `LOW` minimum and `HIGH` for any "medium" or "high" request. 2.0-family models have no thinking config at all.
+Reasoning levels (`--reasoning off|minimum|low|medium|high|maximum`, also configurable in `/settings` as **thinking level**) map differently per generation. Budget-based providers use roughly 1k/2k/8k/16k/32k thinking tokens for minimum/low/medium/high/maximum, with provider/model caps applied (Gemini 2.5 Pro caps at 32k; Flash at 24k). Gemini 3.x uses the `thinkingLevel` enum (`MINIMAL`/`LOW`/`MEDIUM`/`HIGH`), with Gemini-3-Pro pinned to `LOW` minimum and `HIGH` for any "medium" or higher request. Effort-based OpenAI-compatible chat providers map minimum to `low`, low/medium directly, and high/maximum to `high`; the Codex/Responses backend maps maximum to `xhigh` where supported. `off` sends no reasoning config. 2.0-family Gemini models have no thinking config at all.
 
 You can add additional Gemini model IDs to `models.json` under the `google` provider.
 
