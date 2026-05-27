@@ -71,7 +71,16 @@ notes:
   * Dev builds (version 0.0.0) are refused — they typically come from
     'go install' or a local 'make build' and shouldn't be silently
     replaced with a release binary.
-  * Honours $GITHUB_TOKEN if set, so private-repo releases work.`)
+  * Honours $GITHUB_TOKEN if set, so private-repo releases work.
+  * After the binary is installed, every extension under
+    $ZOT_HOME/extensions/ that is a git checkout is fast-forward
+    pulled (no merge, no rebase). Dirty worktrees are stashed and
+    restored. Extensions without a .git directory, disabled
+    extensions, and pulls that fail (offline, diverged, etc.) are
+    skipped per-extension and never abort the overall update. zot
+    does NOT run any build step after pulling — authors are expected
+    to commit a working binary, or you can rebuild manually and
+    /reload-ext.`)
 }
 
 // runUpdateCheck just prints what would happen without doing the
@@ -205,6 +214,12 @@ func runUpdate(version string) error {
 		return fmt.Errorf("replace binary: %w", err)
 	}
 	fmt.Printf("zot update: installed %s\n", latest)
+
+	// Best-effort: also refresh installed extensions that live in
+	// git checkouts. Failures here are advisory and never abort the
+	// overall update — the binary swap already succeeded.
+	updateAllExtensions(ZotHome())
+
 	return nil
 }
 

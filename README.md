@@ -598,6 +598,16 @@ zot ext remove <name>             # delete an extension directory
 
 For development, point `zot --ext <path>` at a working directory and skip the install step entirely. Repeatable; takes precedence over installed extensions of the same name.
 
+### Updating extensions
+
+`zot update` refreshes the zot binary **and** every installed extension that lives in a git checkout. Per-extension behaviour:
+
+- Disabled extensions are skipped.
+- Extensions without a `.git/` directory (installed by `zot ext install ./local-path`) are skipped — there is no remote to pull from.
+- For the rest, zot stashes any dirty worktree state (including untracked runtime files like `todos.json` or `config.json`), runs `git pull --ff-only`, and pops the stash. If the pop produces conflicts, the conflict markers are left in place and you'll see a warning.
+- Diverged branches, offline pulls, or any other git failure are reported as `failed` and the next extension is processed. `zot update` itself never aborts because of an extension.
+- zot does **not** run any build step (`go build`, `npm install`, `make`) after the pull. Extension authors are expected to commit the runnable artifact (binary, transpiled JS, etc.). If you need a build, rebuild manually and use `/reload-ext`.
+
 ### Reference
 
 `examples/extensions/` ships reference implementations in Go, TypeScript, Node, and shell. See [docs/extensions.md](docs/extensions.md) for the full protocol, the SDK API (`packages/agent/ext`), and the phase roadmap.
