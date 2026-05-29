@@ -332,8 +332,9 @@ var DefaultModel = Catalog[0] // claude-sonnet-4-5
 // models loaded via SetLiveModels.
 
 var (
-	activeMu sync.RWMutex
-	active   []Model = Catalog // default: just the static catalog
+	activeMu  sync.RWMutex
+	active    []Model // live overlay merged in via SetLiveModels; nil = none yet
+	activeSet bool    // true once SetLiveModels has run (even with empty live)
 )
 
 // SetLiveModels replaces the "live" overlay used by the active catalog.
@@ -342,19 +343,33 @@ var (
 func SetLiveModels(live []Model) {
 	activeMu.Lock()
 	defer activeMu.Unlock()
+	activeSet = true
 	if len(live) == 0 {
-		active = Catalog
+		active = nil
 		return
 	}
 	active = MergeCatalog(live)
 }
 
 // Active returns the current merged catalog.
+//
+// When no live overlay has been set it returns the fully-assembled
+// static Catalog. Reading Catalog here (rather than capturing it into
+// a package-level var initializer) is load-bearing: the extended
+// catalog in catalog_builtin.go / extra_models.go is appended from
+// init() functions, which run AFTER package-level var initializers.
+// Snapshotting Catalog at var-init time would freeze the picker to the
+// curated seed list and drop every extra provider (openrouter, groq,
+// xai, ...). Deferring the read to call time avoids that ordering trap.
 func Active() []Model {
 	activeMu.RLock()
 	defer activeMu.RUnlock()
-	out := make([]Model, len(active))
-	copy(out, active)
+	src := active
+	if !activeSet || src == nil {
+		src = Catalog
+	}
+	out := make([]Model, len(src))
+	copy(out, src)
 	return out
 }
 

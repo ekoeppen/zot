@@ -48,21 +48,22 @@ func newModelDialog() *modelDialog {
 // it can be pre-selected.
 func (d *modelDialog) Open(current string, loggedInProviders []string) {
 	d.active = true
-	all := provider.Active()
-	if len(loggedInProviders) > 0 {
-		provSet := map[string]bool{}
-		for _, p := range loggedInProviders {
-			provSet[p] = true
-		}
-		var filtered []provider.Model
-		for _, m := range all {
-			if provSet[m.Provider] {
-				filtered = append(filtered, m)
-			}
-		}
-		all = filtered
+	// Only surface models the user can actually reach: a provider is
+	// shown only when it has a resolvable credential (api key, oauth
+	// subscription, or the always-available ollama). An empty
+	// loggedInProviders list therefore yields an empty picker rather
+	// than dumping the entire ~900-model catalog.
+	provSet := map[string]bool{}
+	for _, p := range loggedInProviders {
+		provSet[p] = true
 	}
-	d.all = sortedModels(all)
+	var filtered []provider.Model
+	for _, m := range provider.Active() {
+		if provSet[m.Provider] {
+			filtered = append(filtered, m)
+		}
+	}
+	d.all = sortedModels(filtered)
 	d.current = current
 	d.query = ""
 	d.provW, d.idW = columnWidths(d.all)
@@ -148,7 +149,11 @@ func (d *modelDialog) Render(th tui.Theme, width int) []string {
 	lines = append(lines, th.FG256(th.Muted, hint))
 
 	if len(d.view) == 0 {
-		lines = append(lines, th.FG256(th.Muted, "  no models match "+fmt.Sprintf("%q", d.query)))
+		msg := "  no models match " + fmt.Sprintf("%q", d.query)
+		if len(d.all) == 0 {
+			msg = "  no credentials found - run /login to add an api key or subscription"
+		}
+		lines = append(lines, th.FG256(th.Muted, msg))
 		lines = append(lines, frameRule(th, width))
 		return lines
 	}
