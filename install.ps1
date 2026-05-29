@@ -13,9 +13,10 @@
 # and moves it into $ZOT_PREFIX (defaults to $HOME\bin, added to PATH
 # via the User environment if missing).
 #
-# While the repo is private, set $env:GITHUB_TOKEN to a PAT with
-# `contents:read` scope; the script uses it for every download. Once
-# the repo goes public, the token becomes optional.
+# $env:GITHUB_TOKEN is optional for the public repo. Set it to a PAT
+# with `contents:read` scope if you hit GitHub API rate limits (or if
+# you are installing from a private fork); the script then uses it for
+# the version lookup and every download.
 
 
 [CmdletBinding()]
@@ -58,19 +59,40 @@ if ($arch -eq "arm64") {
 }
 
 # ---- resolve version ----
+#
+# Resolve "latest" through the GitHub releases API. This works the same
+# on Windows PowerShell 5.1 and PowerShell 7+, unlike scraping the
+# /releases/latest redirect target: on PS7 the final URL lives at
+# $resp.BaseResponse.RequestMessage.RequestUri while on PS5.1 it is
+# $resp.BaseResponse.ResponseUri, and relying on either breaks on the
+# other runtime. The API returns the tag directly, so there is nothing
+# to scrape.
 
 if ($Version -eq "latest") {
-  if ($headers.ContainsKey("Authorization")) {
-    $api = Invoke-RestMethod -Headers $headers "https://api.github.com/repos/$owner/$repo/releases/latest"
-    $Version = $api.tag_name
-  } else {
-    $resp = Invoke-WebRequest -UseBasicParsing -MaximumRedirection 5 `
-      "https://github.com/$owner/$repo/releases/latest"
-    if ($resp.BaseResponse.ResponseUri -match '/tag/([^/]+)') {
-      $Version = $Matches[1]
+  $apiUrl = "https://api.github.com/repos/$owner/$repo/releases/latest"
+  # GitHub's API wants a User-Agent; Invoke-RestMethod sets one, but be
+  # explicit so corporate proxies that strip it don't trip a 403.
+  $apiHeaders = @{} + $headers
+  if (-not $apiHeaders.ContainsKey("User-Agent")) { $apiHeaders["User-Agent"] = "zot-installer" }
+  $apiHeaders["Accept"] = "application/vnd.github+json"
+
+  try {
+    $api = Invoke-RestMethod -UseBasicParsing -Headers $apiHeaders -Uri $apiUrl
+  } catch {
+    $status = $null
+    try { $status = [int]$_.Exception.Response.StatusCode } catch {}
+    if ($status -eq 404) {
+      Die "no published release found for $owner/$repo (the repo may have no releases yet)"
+    } elseif ($status -eq 401 -or $status -eq 403) {
+      Die "GitHub API request was rejected ($status). If the repo is private, set `$env:GITHUB_TOKEN to a PAT with contents:read; otherwise you may be rate-limited (try again later or set `$env:GITHUB_TOKEN)."
     } else {
-      Die "could not resolve latest version (set `$env:GITHUB_TOKEN if the repo is private)"
+      Die "could not resolve latest version: $($_.Exception.Message)"
     }
+  }
+
+  $Version = $api.tag_name
+  if (-not $Version) {
+    Die "could not resolve latest version: GitHub API returned no tag_name for $owner/$repo"
   }
 }
 
