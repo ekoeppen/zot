@@ -285,6 +285,94 @@ func (c *bedrockClient) buildRequest(req Request) (*bedrockRequest, error) {
 	return out, nil
 }
 
+// resolveBedrockInferenceProfileID maps a bare foundation-model ID to
+// its region-matched cross-region inference-profile ID.
+//
+// Several newer Bedrock models (Anthropic Claude 4.x, DeepSeek, etc.)
+// cannot be invoked with on-demand throughput by their plain
+// foundation-model ID; Bedrock returns HTTP 400 demanding "the ID or
+// ARN of an inference profile that contains this model". The profile
+// ID is the same model ID with a geographic prefix (us/eu/apac/...).
+//
+// We only rewrite IDs that (a) lack an existing geo prefix and (b)
+// belong to a model family that requires a profile. IDs that already
+// carry a prefix (e.g. "eu.anthropic...", "global.anthropic...") or
+// fully-qualified ARNs are returned unchanged, so explicit user
+// choices and custom application inference profiles still work.
+func resolveBedrockInferenceProfileID(modelID, region string) string {
+	if modelID == "" {
+		return modelID
+	}
+	// ARNs are already inference-profile references; leave untouched.
+	if strings.HasPrefix(modelID, "arn:") {
+		return modelID
+	}
+	// Already geo-prefixed (us. / eu. / apac. / ap. / us-gov. / global.)?
+	if bedrockHasGeoPrefix(modelID) {
+		return modelID
+	}
+	if !bedrockRequiresInferenceProfile(modelID) {
+		return modelID
+	}
+	prefix := bedrockGeoPrefixForRegion(region)
+	if prefix == "" {
+		return modelID
+	}
+	return prefix + "." + modelID
+}
+
+// bedrockGeoPrefixes are the cross-region inference-profile geo
+// prefixes Bedrock uses. A model ID that starts with one of these
+// (followed by a dot) is already a profile reference.
+var bedrockGeoPrefixes = []string{"us-gov", "us", "eu", "apac", "ap", "global", "au"}
+
+func bedrockHasGeoPrefix(modelID string) bool {
+	for _, p := range bedrockGeoPrefixes {
+		if strings.HasPrefix(modelID, p+".") {
+			return true
+		}
+	}
+	return false
+}
+
+// bedrockRequiresInferenceProfile reports whether a bare
+// foundation-model ID is one of the families AWS only exposes through
+// a cross-region inference profile for on-demand throughput.
+func bedrockRequiresInferenceProfile(modelID string) bool {
+	switch {
+	case strings.HasPrefix(modelID, "anthropic.claude-"):
+		return true
+	case strings.HasPrefix(modelID, "deepseek."):
+		return true
+	default:
+		return false
+	}
+}
+
+// bedrockGeoPrefixForRegion maps an AWS region to the geo prefix used
+// by its cross-region inference profiles. Returns "" when the region
+// has no known mapping, in which case the model ID is left unchanged.
+func bedrockGeoPrefixForRegion(region string) string {
+	switch {
+	case region == "":
+		return "us"
+	case strings.HasPrefix(region, "us-gov-"):
+		return "us-gov"
+	case strings.HasPrefix(region, "us-"):
+		return "us"
+	case strings.HasPrefix(region, "eu-"):
+		return "eu"
+	case strings.HasPrefix(region, "ap-"):
+		return "apac"
+	case strings.HasPrefix(region, "ca-"):
+		return "us"
+	case strings.HasPrefix(region, "sa-"):
+		return "us"
+	default:
+		return "us"
+	}
+}
+
 func (c *bedrockClient) Stream(ctx context.Context, req Request) (<-chan Event, error) {
 	wire, err := c.buildRequest(req)
 	if err != nil {
@@ -294,7 +382,8 @@ func (c *bedrockClient) Stream(ctx context.Context, req Request) (<-chan Event, 
 	if err != nil {
 		return nil, err
 	}
-	url := c.baseURL + "/model/" + req.Model + "/converse-stream"
+	modelID := resolveBedrockInferenceProfileID(req.Model, c.region)
+	url := c.baseURL + "/model/" + modelID + "/converse-stream"
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
