@@ -69,3 +69,58 @@ func TestExtInstallNamedDir(t *testing.T) {
 		t.Fatalf("expected installed extension: %v", err)
 	}
 }
+
+// TestCopyDirRespectsGitignore verifies that non-portable directories
+// listed in the source .gitignore (e.g. .venv, node_modules) are not
+// copied during install, while tracked files are.
+func TestCopyDirRespectsGitignore(t *testing.T) {
+	src := t.TempDir()
+	dst := filepath.Join(t.TempDir(), "out")
+
+	mustWrite := func(rel, content string) {
+		p := filepath.Join(src, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mustWrite("extension.json", `{"name":"x"}`)
+	mustWrite("main.py", "print('hi')")
+	mustWrite(".gitignore", ".venv/\nnode_modules/\n*.log\n")
+	mustWrite(".venv/bin/python", "binary")
+	mustWrite("node_modules/pkg/index.js", "module")
+	mustWrite("debug.log", "noise")
+	mustWrite("src/app.py", "code")
+	mustWrite(".git/config", "gitdir")
+
+	if err := copyDir(src, dst); err != nil {
+		t.Fatal(err)
+	}
+
+	wantPresent := []string{"extension.json", "main.py", "src/app.py", ".gitignore"}
+	for _, rel := range wantPresent {
+		if _, err := os.Stat(filepath.Join(dst, filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("expected %s to be copied: %v", rel, err)
+		}
+	}
+
+	wantAbsent := []string{".venv", "node_modules", "debug.log", ".git"}
+	for _, rel := range wantAbsent {
+		if _, err := os.Stat(filepath.Join(dst, filepath.FromSlash(rel))); err == nil {
+			t.Fatalf("expected %s to be skipped, but it was copied", rel)
+		}
+	}
+}
+
+func TestGitignoreNegation(t *testing.T) {
+	g := loadGitignoreFromString("build/\n!build/keep.txt\n")
+	if !g.match("build", true) {
+		t.Fatal("expected build/ dir to be ignored")
+	}
+	if g.match("build/keep.txt", false) {
+		t.Fatal("expected build/keep.txt to be re-included by negation")
+	}
+}
