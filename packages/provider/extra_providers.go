@@ -112,7 +112,7 @@ func NewXiaomiTokenPlan(region, apiKey, baseURL string) Client {
 // NewOpenRouter: OpenRouter aggregator. Unlocks dozens of upstream
 // models with one key.
 func NewOpenRouter(apiKey, baseURL string) Client {
-	return newOpenAICompat("openrouter", apiKey, baseURL, "https://openrouter.ai/api/v1")
+	return newOpenAICompat("openrouter", apiKey, baseURL, openrouterDefaultBaseURL)
 }
 
 // NewOpenCode is the opencode.ai Zen endpoint. Mixed APIs upstream; this

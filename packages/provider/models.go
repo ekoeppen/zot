@@ -223,6 +223,17 @@ var Catalog = []Model{
 		PriceInput: 0.075, PriceOutput: 0.3, PriceCacheRead: 0,
 	},
 
+	// ---- OpenRouter ----
+	// Seed entry only: the default model returned by defaultModelForProvider
+	// so it resolves offline. The full OpenRouter catalog is discovered live
+	// (DiscoverOpenRouter) and overlays this on refresh.
+	{
+		Provider: "openrouter", ID: "anthropic/claude-sonnet-4.5", DisplayName: "Claude Sonnet 4.5 (OpenRouter)",
+		ContextWindow: 1000000, MaxOutput: 64000, Reasoning: true,
+		PriceInput: 3, PriceOutput: 15, PriceCacheRead: 0.3, PriceCacheWrite: 3.75,
+		BaseURL: openrouterDefaultBaseURL,
+	},
+
 	// ---- Speculative: Anthropic ----
 	{
 		Provider: "anthropic", ID: "claude-opus-4-5", DisplayName: "Claude Opus 4.5 (latest)",

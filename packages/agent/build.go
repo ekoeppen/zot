@@ -317,8 +317,15 @@ func Resolve(args Args, requireCred bool) (Resolved, error) {
 	// never shows a "not logged in" banner.
 	userPickedProvider := args.Provider != ""
 	if credErr != nil && !userPickedProvider && provName != "ollama" {
-		for _, other := range []string{"anthropic", "openai", "openai-codex", "kimi", "deepseek", "google"} {
-			if other == provName {
+		// Scan every known provider (not a hardcoded subset) so any
+		// env-based credential is discovered, e.g. an env-only
+		// amazon-bedrock setup (AWS_BEARER_TOKEN_BEDROCK / AWS_PROFILE /
+		// IAM keys) when no config.json pins the provider, such as after
+		// pointing ZOT_HOME at a fresh home dir. Iteration order of
+		// knownProviders defines fallback priority. ollama is skipped:
+		// it has no credential and would always "match".
+		for _, other := range knownProviders {
+			if other == provName || other == "ollama" {
 				continue
 			}
 			if c, m, a, err := ResolveCredentialFull(other, args.APIKey); err == nil {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -224,4 +225,110 @@ func looksLikeChatModel(id string) bool {
 		return true
 	}
 	return false
+}
+
+const openrouterDefaultBaseURL = "https://openrouter.ai/api/v1"
+
+// DiscoverOpenRouter lists models from OpenRouter's public /models
+// endpoint (no auth). Per-token USD prices are converted to USD per 1M
+// tokens to match the rest of the catalog. baseURL defaults to the
+// public endpoint.
+func DiscoverOpenRouter(ctx context.Context, baseURL string) ([]Model, error) {
+	if baseURL == "" {
+		baseURL = openrouterDefaultBaseURL
+	}
+	baseURL = strings.TrimRight(baseURL, "/")
+	client := &http.Client{Timeout: 15 * time.Second}
+	url := baseURL + "/models"
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("openrouter discover http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var page struct {
+		Data []struct {
+			ID            string `json:"id"`
+			Name          string `json:"name"`
+			ContextLength int    `json:"context_length"`
+			Pricing       struct {
+				Prompt          string `json:"prompt"`
+				Completion      string `json:"completion"`
+				InputCacheRead  string `json:"input_cache_read"`
+				InputCacheWrite string `json:"input_cache_write"`
+			} `json:"pricing"`
+			TopProvider struct {
+				ContextLength       int  `json:"context_length"`
+				MaxCompletionTokens *int `json:"max_completion_tokens"`
+			} `json:"top_provider"`
+			SupportedParameters []string `json:"supported_parameters"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &page); err != nil {
+		return nil, fmt.Errorf("openrouter discover parse: %w", err)
+	}
+	var out []Model
+	for _, d := range page.Data {
+		if d.ID == "" {
+			continue
+		}
+		display := d.Name
+		if display == "" {
+			display = d.ID
+		}
+		ctxWin := d.ContextLength
+		if ctxWin == 0 {
+			ctxWin = d.TopProvider.ContextLength
+		}
+		maxOut := 0
+		if d.TopProvider.MaxCompletionTokens != nil {
+			maxOut = *d.TopProvider.MaxCompletionTokens
+		}
+		out = append(out, Model{
+			Provider:        "openrouter",
+			ID:              d.ID,
+			DisplayName:     display,
+			ContextWindow:   ctxWin,
+			MaxOutput:       maxOut,
+			Reasoning:       openrouterSupportsReasoning(d.SupportedParameters),
+			PriceInput:      perMillionTokens(d.Pricing.Prompt),
+			PriceOutput:     perMillionTokens(d.Pricing.Completion),
+			PriceCacheRead:  perMillionTokens(d.Pricing.InputCacheRead),
+			PriceCacheWrite: perMillionTokens(d.Pricing.InputCacheWrite),
+			BaseURL:         baseURL,
+			Source:          "live",
+		})
+	}
+	return out, nil
+}
+
+// openrouterSupportsReasoning reports whether OpenRouter's
+// supported_parameters list marks the model as reasoning-capable.
+func openrouterSupportsReasoning(params []string) bool {
+	for _, p := range params {
+		if p == "reasoning" || p == "include_reasoning" {
+			return true
+		}
+	}
+	return false
+}
+
+// perMillionTokens converts a per-token USD price string to USD per 1M
+// tokens. Empty or unparseable values become 0.
+func perMillionTokens(s string) float64 {
+	if s == "" {
+		return 0
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return v * 1_000_000
 }

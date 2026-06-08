@@ -150,6 +150,13 @@ func refreshModels() {
 			all = append(all, live...)
 		}
 	}
+	if _, _, err := ResolveCredential("openrouter", ""); err == nil {
+		// /models is public; gate on a credential so the picker only
+		// fills with OpenRouter's hundreds of routes for users who use it.
+		if live, err := provider.DiscoverOpenRouter(ctx, ""); err == nil {
+			all = append(all, live...)
+		}
+	}
 
 	if len(all) == 0 {
 		return

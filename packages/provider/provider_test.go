@@ -306,3 +306,70 @@ func TestOpenAIStreamHappyPath(t *testing.T) {
 		t.Fatalf("stop=%v", done.Stop)
 	}
 }
+
+func TestDiscoverOpenRouter(t *testing.T) {
+	const body = `{"data":[
+		{"id":"x/full","pricing":{"prompt":"0.000003","completion":"0.000015"},
+		 "context_length":200000,"top_provider":{"max_completion_tokens":64000},
+		 "supported_parameters":["reasoning"]},
+		{"id":"x/fallback","top_provider":{"context_length":128000}},
+		{"id":""}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	models, err := DiscoverOpenRouter(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 { // empty id dropped
+		t.Fatalf("want 2 models, got %d", len(models))
+	}
+	// per-token USD -> per-1M; reasoning from supported_parameters.
+	if m := models[0]; m.Provider != "openrouter" || m.ContextWindow != 200000 ||
+		m.MaxOutput != 64000 || !m.Reasoning || m.PriceInput != 3 || m.PriceOutput != 15 {
+		t.Errorf("model[0]: %+v", m)
+	}
+	// context falls back to top_provider; no reasoning.
+	if m := models[1]; m.ContextWindow != 128000 || m.MaxOutput != 0 || m.Reasoning {
+		t.Errorf("model[1]: %+v", m)
+	}
+}
+
+// TestOpenAIOmitsZeroMaxTokens guards against sending max_tokens: 0 for
+// discovered models that don't advertise an output cap (MaxOutput == 0).
+func TestOpenAIOmitsZeroMaxTokens(t *testing.T) {
+	SetLiveModels([]Model{
+		{Provider: "openrouter", ID: "vendor/no-cap", DisplayName: "No Cap"},
+		{Provider: "openrouter", ID: "vendor/reason-no-cap", DisplayName: "Reason No Cap", Reasoning: true},
+		{Provider: "openrouter", ID: "vendor/capped", DisplayName: "Capped", MaxOutput: 4096},
+	})
+	defer SetLiveModels(nil)
+
+	c := NewOpenAI("x", "").(*openaiClient)
+
+	got, err := c.buildRequest(Request{Model: "vendor/no-cap"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MaxTokens != nil {
+		t.Errorf("expected max_tokens omitted, got %d", *got.MaxTokens)
+	}
+
+	got, err = c.buildRequest(Request{Model: "vendor/reason-no-cap"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MaxCompletionTok != nil {
+		t.Errorf("expected max_completion_tokens omitted, got %d", *got.MaxCompletionTok)
+	}
+
+	got, err = c.buildRequest(Request{Model: "vendor/capped"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MaxTokens == nil || *got.MaxTokens != 4096 {
+		t.Errorf("expected max_tokens 4096, got %v", got.MaxTokens)
+	}
+}
