@@ -83,6 +83,22 @@ func main() {
 			pid := nextPID()
 			decision := make(chan bool, 1)
 
+			buildLines := func(hint string) []string {
+				lines := []string{
+					"  Action:  " + in.Action,
+				}
+				if strings.TrimSpace(in.Reason) != "" {
+					lines = append(lines, "  Reason:  "+in.Reason)
+				}
+				lines = append(lines, "")
+				lines = append(lines, "  "+hint)
+				return lines
+			}
+
+			const footer = "● this panel has focus — y approve  n deny  esc cancel"
+			const prompt = "› approve this action? [y/n]"
+			const badKey = "› unrecognised key — press y to approve or n to deny"
+
 			// Register key handler before opening the panel so there
 			// is no window where a key could arrive unhandled.
 			e.OnPanelKey(pid, func(key, text string) {
@@ -94,6 +110,11 @@ func main() {
 					key == "esc":
 					e.ClosePanel(pid)
 					decision <- false
+				default:
+					// Unknown key: re-render with a nudge so the user
+					// knows the panel is alive and what to press.
+					e.RenderPanel(pid, "Approval required",
+						buildLines(badKey), footer)
 				}
 			}, func() {
 				// Host closed the panel (e.g. user navigated away).
@@ -103,16 +124,8 @@ func main() {
 				}
 			})
 
-			lines := []string{
-				"  Action:  " + in.Action,
-			}
-			if strings.TrimSpace(in.Reason) != "" {
-				lines = append(lines, "  Reason:  "+in.Reason)
-			}
-			lines = append(lines, "", "    y  approve      n / esc  deny")
-
 			// Open the panel spontaneously from inside the tool handler.
-			e.OpenPanel(pid, "Approval required", lines, "y approve  n deny  esc cancel")
+			e.OpenPanel(pid, "Approval required", buildLines(prompt), footer)
 
 			// Block until the user responds.
 			if <-decision {
