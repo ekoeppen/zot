@@ -116,6 +116,14 @@ type NotifyFromExt struct {
 	Message string `json:"message"`
 }
 
+// ClearNotesFromExt is a spontaneous frame an extension can send to
+// retract every note it previously pushed via notify/display, so
+// transient status lines (e.g. an approval prompt) do not stack up
+// forever in the bottom-sticky notes block.
+type ClearNotesFromExt struct {
+	Type string `json:"type"`
+}
+
 // SubmitSlashFromExt is a spontaneous frame an extension can send at
 // any time (typically from a panel_key handler) to invoke a slash
 // command in the host's TUI as if the user had typed it. Text must

@@ -145,8 +145,14 @@ you can — newer extensions on faster hosts shave that 250ms off.
 {"type":"event_intercept_response","id":"ghi","block":true,
  "reason":"refused: command matches the danger pattern \"rm -rf\""}
 {"type":"notify","level":"info","message":"refreshed cache"}
+{"type":"clear_notes"}
 {"type":"shutdown_ack"}
 ```
+
+`notify` notes are one-shot: they clear when the user sends their next
+prompt (and on `esc` / `/clear`). Send `clear_notes` to retract every
+note this extension pushed earlier (e.g. a transient approval prompt)
+without waiting for the next turn; other extensions' notes are kept.
 
 `command_response.action` values:
 - `"prompt"` — submit `prompt` as a fresh user message

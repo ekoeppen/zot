@@ -142,6 +142,14 @@ func (h *rpcExtHooks) Display(extName, text string) {
 		})
 	}
 }
+func (h *rpcExtHooks) ClearNotes(extName string) {
+	if h.server != nil {
+		h.server.writeEvent(map[string]any{
+			"type":      "ext_clear_notes",
+			"extension": extName,
+		})
+	}
+}
 func (h *rpcExtHooks) Submit(string)                                        {} // ignored in rpc mode
 func (h *rpcExtHooks) SubmitSlash(string)                                   {} // ignored in rpc mode
 func (h *rpcExtHooks) Insert(string)                                        {} // ignored in rpc mode

@@ -305,9 +305,6 @@ func Resolve(args Args, requireCred bool) (Resolved, error) {
 		credErr   error
 	)
 	if provName == "ollama" {
-		if args.BaseURL == "" {
-			args.BaseURL = "http://localhost:11434"
-		}
 		cred = firstNonEmpty(args.APIKey, "ollama")
 		method = "apikey"
 	} else {
@@ -398,9 +395,14 @@ func Resolve(args Args, requireCred bool) (Resolved, error) {
 	}
 
 	// If the model defines a base URL (e.g. local ollama) and the
-	// user didn't pass --base-url, use the model's URL.
+	// user didn't pass --base-url, use the model's URL. For ollama,
+	// keep http://localhost:11434 as a fallback only after the model
+	// metadata has had a chance to provide a custom baseUrl.
 	if args.BaseURL == "" && resolvedModel.BaseURL != "" {
 		args.BaseURL = resolvedModel.BaseURL
+	}
+	if args.BaseURL == "" && provName == "ollama" {
+		args.BaseURL = "http://localhost:11434"
 	}
 
 	// If the model has a base URL, credentials are optional (local

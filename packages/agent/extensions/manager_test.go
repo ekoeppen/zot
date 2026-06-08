@@ -16,9 +16,10 @@ import (
 
 // stubHooks records every callback so the test can assert on them.
 type stubHooks struct {
-	mu       sync.Mutex
-	notifies []string
-	displays []string
+	mu         sync.Mutex
+	notifies   []string
+	displays   []string
+	clearNotes []string
 }
 
 func (s *stubHooks) Notify(name, level, message string) {
@@ -33,6 +34,11 @@ func (s *stubHooks) Display(name, text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.displays = append(s.displays, name+":"+text)
+}
+func (s *stubHooks) ClearNotes(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clearNotes = append(s.clearNotes, name)
 }
 func (s *stubHooks) OpenPanel(string, extproto.PanelSpec)                 {}
 func (s *stubHooks) UpdatePanel(string, string, string, []string, string) {}

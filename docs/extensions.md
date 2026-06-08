@@ -337,7 +337,22 @@ Closes a previously-open panel.
 ```
 
 `level` is one of `info`, `success`, `warn`, `error`. The note shows
-up below the transcript with the extension's name in brackets.
+up below the transcript with the extension's name in brackets. Notes
+are one-shot: they clear automatically when the user sends their next
+prompt (and on `esc` / `/clear`).
+
+#### `clear_notes` (one-way, any time)
+
+Removes every note this extension previously pushed via `notify` /
+`display`. Use it for transient status lines (e.g. an approval prompt)
+so they do not stack up; notes from other extensions are untouched.
+
+```json
+{"type":"clear_notes"}
+```
+
+In `--mode rpc`, this surfaces to the host as an `ext_clear_notes`
+event (alongside `ext_notify` / `ext_display`).
 
 #### `shutdown_ack`
 
@@ -593,7 +608,7 @@ trust or run zot under your platform's sandboxing tool (`bwrap` /
 Phase 1 (shipped):
 - [x] subprocess lifecycle + hello handshake
 - [x] `register_command` + `command_invoked`
-- [x] `notify`
+- [x] `notify` + `clear_notes`
 - [x] `zot ext` CLI
 
 Phase 2 (shipped):

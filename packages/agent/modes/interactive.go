@@ -260,17 +260,28 @@ type Interactive struct {
 	streamFlushPending bool
 	toolCalls          map[string]*tui.ToolCallView
 	toolOrder          []string
-	statusErr          string
-	statusOK           string
-	liveBlock          []string // live streaming/tool progress rendered outside scrollback
-	helpBlock          []string // rendered above the chat when /help was typed
-	cumUsage           provider.Usage
-	lastCtxInput       int // input_tokens of the most recent turn — approximates current context size
-	busy               bool
-	dirty              chan struct{}
-	cancelTurn         context.CancelFunc
-	scrollOffset       int // rows from the bottom; 0 = pinned to latest
-	prevScrollOffset   int // last value redraw snapped against; tracks intent
+	// toolGate records, per tool-call id, how many runes of paced
+	// assistant text must have drained into `streaming` before that
+	// tool block may appear. It exists to make stream ordering
+	// deterministic: a tool call can arrive from the provider while
+	// the prose that logically precedes it is still being typed out
+	// by the pacer. Without gating, the tool block would render
+	// immediately while the intro paragraph keeps filling in below
+	// it. We snapshot the total expected stream length (already
+	// streamed + still pending) at the moment the tool starts, and
+	// hold the block back until the pacer reaches it.
+	toolGate         map[string]int
+	statusErr        string
+	statusOK         string
+	liveBlock        []string // live streaming/tool progress rendered outside scrollback
+	helpBlock        []string // rendered above the chat when /help was typed
+	cumUsage         provider.Usage
+	lastCtxInput     int // input_tokens of the most recent turn — approximates current context size
+	busy             bool
+	dirty            chan struct{}
+	cancelTurn       context.CancelFunc
+	scrollOffset     int // rows from the bottom; 0 = pinned to latest
+	prevScrollOffset int // last value redraw snapped against; tracks intent
 
 	// prevChatLen and prevChatCols track the chat buffer's size at the
 	// last redraw so that when content grows below the user's viewport
@@ -440,6 +451,7 @@ func NewInteractive(cfg InteractiveConfig) *Interactive {
 		ed:                tui.NewEditor(cfg.Theme.AccentBar(cfg.Theme.Accent)),
 		rend:              renderer,
 		toolCalls:         map[string]*tui.ToolCallView{},
+		toolGate:          map[string]int{},
 		dirty:             make(chan struct{}, 8),
 		dialog:            newLoginDialog(),
 		modelDialog:       newModelDialog(),
@@ -824,6 +836,14 @@ func (i *Interactive) buildChatLocked(cols int) []string {
 	i.view.ToolCalls = i.view.ToolCalls[:0]
 	if i.busy {
 		for _, id := range i.toolOrder {
+			// Deterministic ordering: a tool block stays hidden until
+			// the paced assistant text that preceded it has finished
+			// typing out. toolOrder is append-only in arrival order,
+			// so once one tool is still gated, every later tool is too,
+			// so stop here to avoid showing a tool out of sequence.
+			if !i.toolGateOpenLocked(id) {
+				break
+			}
 			if tc, ok := i.toolCalls[id]; ok {
 				i.view.ToolCalls = append(i.view.ToolCalls, *tc)
 			}
@@ -2356,6 +2376,36 @@ func (i *Interactive) Notify(extName, level, message string) {
 	i.invalidate()
 }
 
+// ClearNotes removes every note line owned by extName from the
+// bottom-sticky ext-notes block. Extensions use this to retract a
+// transient status line (e.g. an approval prompt) once it no longer
+// applies, instead of leaving it stacked forever. Notes from other
+// extensions and internal notes (auto-compact) are left untouched.
+func (i *Interactive) ClearNotes(extName string) {
+	marker := "[" + extName + "] "
+	i.mu.Lock()
+	if len(i.extNotes) == 0 {
+		i.mu.Unlock()
+		return
+	}
+	kept := i.extNotes[:0:0]
+	changed := false
+	for _, line := range i.extNotes {
+		if strings.Contains(line, marker) {
+			changed = true
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if changed {
+		i.extNotes = kept
+	}
+	i.mu.Unlock()
+	if changed {
+		i.invalidate()
+	}
+}
+
 // Submit feeds text through the agent loop as if the user had typed it.
 func (i *Interactive) Submit(text string) {
 	if cmd, ok := shellEscapeCommand(text); ok {
@@ -2382,6 +2432,7 @@ func (i *Interactive) ApplyChangedCWD(ag *core.Agent, provider, model, cwd strin
 	i.cfg.Model = model
 	i.toolCalls = map[string]*tui.ToolCallView{}
 	i.toolOrder = nil
+	i.toolGate = map[string]int{}
 	i.helpBlock = nil
 	i.parkedTurn = 0
 	i.statusErr = ""
@@ -3051,6 +3102,7 @@ func (i *Interactive) runSlash(ctx context.Context, cmd string) (done bool) {
 		i.mu.Lock()
 		i.toolCalls = map[string]*tui.ToolCallView{}
 		i.toolOrder = nil
+		i.toolGate = map[string]int{}
 		i.statusErr = ""
 		i.statusOK = ""
 		i.helpBlock = nil
@@ -3170,6 +3222,7 @@ func (i *Interactive) runSlash(ctx context.Context, cmd string) (done bool) {
 		i.mu.Lock()
 		i.toolCalls = map[string]*tui.ToolCallView{}
 		i.toolOrder = nil
+		i.toolGate = map[string]int{}
 		i.helpBlock = nil
 		i.parkedTurn = 0
 		i.statusOK = "cwd " + i.cfg.CWD
@@ -4048,6 +4101,7 @@ func (i *Interactive) runCompact(parent context.Context, auto bool) {
 			i.lastCtxInput = 0
 			i.toolCalls = map[string]*tui.ToolCallView{}
 			i.toolOrder = nil
+			i.toolGate = map[string]int{}
 			i.view.InvalidateRenderCache()
 			// Pop queued prompt if any.
 			if len(i.queued) > 0 {
@@ -4236,7 +4290,9 @@ func (i *Interactive) startTurnWithImages(parent context.Context, prompt string,
 	i.streamOn = true
 	i.toolCalls = map[string]*tui.ToolCallView{}
 	i.toolOrder = nil
+	i.toolGate = map[string]int{}
 	i.shellBlock = nil // sending a prompt clears any parked shell-escape log
+	i.extNotes = nil   // ext notes are one-shot; a new prompt clears them
 	i.scrollOffset = 0 // jump back to the bottom on new turn
 	// Reset the auto-follow baseline so the very next render at
 	// interactive.go:1053 doesn't see a synthetic shrink between
@@ -4502,6 +4558,7 @@ func (i *Interactive) handleEvent(ev core.AgentEvent) {
 		// will populate fresh entries for this turn's tools.
 		i.toolCalls = map[string]*tui.ToolCallView{}
 		i.toolOrder = nil
+		i.toolGate = map[string]int{}
 	case core.EvTextDelta:
 		// Buffer into streamPending; the paintPace ticker drains
 		// it into i.streaming a few runes at a time for a smooth
@@ -4535,6 +4592,7 @@ func (i *Interactive) handleEvent(ev core.AgentEvent) {
 				Streaming: true,
 			}
 			i.toolOrder = append(i.toolOrder, e.ID)
+			i.gateToolLocked(e.ID)
 		}
 	case core.EvToolUseArgs:
 		if tc, ok := i.toolCalls[e.ID]; ok {
@@ -4566,6 +4624,7 @@ func (i *Interactive) handleEvent(ev core.AgentEvent) {
 				Args: tui.ShortArgs(e.Name, e.Args),
 			}
 			i.toolOrder = append(i.toolOrder, e.ID)
+			i.gateToolLocked(e.ID)
 		}
 	case core.EvToolResult:
 		if tc, ok := i.toolCalls[e.ID]; ok {
@@ -5500,6 +5559,55 @@ func (i *Interactive) resetStreamingStateLocked() {
 	i.streamPending = i.streamPending[:0]
 	i.streamFlushPending = false
 	i.streamOn = false
+	i.openAllToolGatesLocked()
+}
+
+// openAllToolGatesLocked drops every pending tool gate so that any
+// tool registered during this turn renders unconditionally from now
+// on. Called when streaming finalizes (the paced text has fully
+// drained and `streaming` is about to reset to length 0): without
+// this, the gate comparison against a freshly-reset streaming buffer
+// would wrongly re-hide tools that had already cleared their gate.
+// Must be called with i.mu held.
+func (i *Interactive) openAllToolGatesLocked() {
+	for id := range i.toolGate {
+		i.toolGate[id] = 0
+	}
+}
+
+// gateToolLocked records the stream position at which a tool call may
+// become visible. The gate is the total length the streaming buffer
+// will reach once the pacer has drained everything currently queued
+// (already painted + still pending). Holding the tool block back
+// until the pacer crosses that mark guarantees the prose emitted
+// before the tool call finishes typing out above it, instead of the
+// tool block snapping in while the paragraph is still filling in.
+//
+// We only gate while text is actively streaming. If no stream is in
+// flight (gate 0), the tool shows immediately, which is the correct
+// behaviour for tool-only turns and replayed sessions. First
+// registration wins so a later EvToolCall can't move an existing
+// gate. Must be called with i.mu held.
+func (i *Interactive) gateToolLocked(id string) {
+	if _, ok := i.toolGate[id]; ok {
+		return
+	}
+	if !i.streamOn {
+		i.toolGate[id] = 0
+		return
+	}
+	i.toolGate[id] = i.streaming.Len() + len(i.streamPending)
+}
+
+// toolGateOpenLocked reports whether the gated tool block may render
+// yet, i.e. the pacer has drained enough text to reach the position
+// recorded when the tool call arrived. Must be called with i.mu held.
+func (i *Interactive) toolGateOpenLocked(id string) bool {
+	gate, ok := i.toolGate[id]
+	if !ok || gate == 0 {
+		return true
+	}
+	return i.streaming.Len() >= gate
 }
 
 // assistantMessageSideEffects runs the non-visual hooks attached to
@@ -5572,6 +5680,7 @@ func (i *Interactive) runStreamPacer(ctx context.Context) {
 					i.streamFlushPending = false
 					i.streaming.Reset()
 					i.streamOn = false
+					i.openAllToolGatesLocked()
 					i.mu.Unlock()
 					i.invalidate()
 					continue

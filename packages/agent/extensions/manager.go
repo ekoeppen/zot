@@ -119,6 +119,10 @@ type HostHooks interface {
 	// invoking the model and without writing to the transcript.
 	Display(extName, text string)
 
+	// ClearNotes removes any notes previously pushed by extName via
+	// Notify/Display so transient status lines do not stack forever.
+	ClearNotes(extName string)
+
 	OpenPanel(extName string, spec extproto.PanelSpec)
 	UpdatePanel(extName, panelID, title string, lines []string, footer string)
 	ClosePanel(extName, panelID string)
@@ -750,6 +754,8 @@ func (m *Manager) readLoop(ext *Extension, scanner *bufio.Scanner) {
 			if err := json.Unmarshal(line, &n); err == nil {
 				m.hooks.Notify(ext.Manifest.Name, n.Level, n.Message)
 			}
+		case "clear_notes":
+			m.hooks.ClearNotes(ext.Manifest.Name)
 		case "submit_slash":
 			// Spontaneous request to invoke a slash command in the
 			// TUI. Refused unless the payload looks like a slash

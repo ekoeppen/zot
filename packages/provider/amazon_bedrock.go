@@ -216,6 +216,61 @@ type bedrockRequest struct {
 	} `json:"toolConfig,omitempty"`
 }
 
+func normalizeBedrockToolResults(msgs []Message) []Message {
+	resultByID := map[string]ToolResultBlock{}
+	for _, m := range msgs {
+		for _, c := range m.Content {
+			if tr, ok := c.(ToolResultBlock); ok {
+				if _, exists := resultByID[tr.CallID]; !exists {
+					resultByID[tr.CallID] = tr
+				}
+			}
+		}
+	}
+
+	out := make([]Message, 0, len(msgs))
+	for _, m := range msgs {
+		copy := m
+		copy.Content = nil
+		var toolCalls []ToolCallBlock
+		for _, c := range m.Content {
+			switch v := c.(type) {
+			case ToolResultBlock:
+				// Bedrock requires toolResult blocks immediately after the
+				// assistant toolUse they answer. Reinsert them from the
+				// assistant pass below instead of preserving their original
+				// location, which may be separated by user text in active
+				// sessions.
+				continue
+			case ToolCallBlock:
+				toolCalls = append(toolCalls, v)
+			}
+			copy.Content = append(copy.Content, c)
+		}
+		if len(copy.Content) > 0 {
+			out = append(out, copy)
+		}
+		if m.Role != RoleAssistant || len(toolCalls) == 0 {
+			continue
+		}
+
+		results := make([]Content, 0, len(toolCalls))
+		for _, tc := range toolCalls {
+			if tr, ok := resultByID[tc.ID]; ok {
+				results = append(results, tr)
+				continue
+			}
+			results = append(results, ToolResultBlock{
+				CallID:  tc.ID,
+				IsError: true,
+				Content: []Content{TextBlock{Text: "tool call did not complete before the next user message"}},
+			})
+		}
+		out = append(out, Message{Role: RoleTool, Content: results, Time: m.Time})
+	}
+	return out
+}
+
 func (c *bedrockClient) buildRequest(req Request) (*bedrockRequest, error) {
 	out := &bedrockRequest{}
 	if req.System != "" {
@@ -226,7 +281,7 @@ func (c *bedrockClient) buildRequest(req Request) (*bedrockRequest, error) {
 	if out.InferenceConfig.MaxTokens == 0 {
 		out.InferenceConfig.MaxTokens = 4096
 	}
-	for _, m := range req.Messages {
+	for _, m := range normalizeBedrockToolResults(req.Messages) {
 		role := string(m.Role)
 		if role == "tool" {
 			role = "user"
@@ -266,6 +321,9 @@ func (c *bedrockClient) buildRequest(req Request) (*bedrockRequest, error) {
 					},
 				})
 			}
+		}
+		if len(bm.Content) == 0 {
+			continue
 		}
 		out.Messages = append(out.Messages, bm)
 	}

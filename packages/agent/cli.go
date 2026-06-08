@@ -67,6 +67,11 @@ func (h *interactiveExtHooks) Display(extName, text string) {
 		iv.Display(extName, text)
 	}
 }
+func (h *interactiveExtHooks) ClearNotes(extName string) {
+	if iv := h.iv(); iv != nil {
+		iv.ClearNotes(extName)
+	}
+}
 func (h *interactiveExtHooks) OpenPanel(extName string, spec extproto.PanelSpec) {
 	if iv := h.iv(); iv != nil {
 		iv.OpenPanel(extName, spec)
@@ -256,6 +261,7 @@ func (nonInteractiveExtHooks) Submit(string)                                    
 func (nonInteractiveExtHooks) SubmitSlash(string)                                   {}
 func (nonInteractiveExtHooks) Insert(string)                                        {}
 func (nonInteractiveExtHooks) Display(string, string)                               {}
+func (nonInteractiveExtHooks) ClearNotes(string)                                    {}
 func (nonInteractiveExtHooks) OpenPanel(string, extproto.PanelSpec)                 {}
 func (nonInteractiveExtHooks) UpdatePanel(string, string, string, []string, string) {}
 func (nonInteractiveExtHooks) ClosePanel(string, string)                            {}

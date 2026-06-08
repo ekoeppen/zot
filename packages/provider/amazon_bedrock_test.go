@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -79,6 +80,71 @@ func TestReadAWSCredentialsFile(t *testing.T) {
 	if _, err := readAWSCredentialsFile("default"); err != nil {
 		// missing file or missing profile is fine — both are non-panics
 		t.Logf("no aws creds available (expected on CI): %v", err)
+	}
+}
+
+func TestNormalizeBedrockToolResultsMovesResultsAdjacentToToolUse(t *testing.T) {
+	msgs := []Message{
+		{Role: RoleAssistant, Content: []Content{ToolCallBlock{ID: "tool-1", Name: "edit", Arguments: json.RawMessage(`{"path":"a"}`)}}},
+		{Role: RoleUser, Content: []Content{TextBlock{Text: "what's wrong"}}},
+		{Role: RoleTool, Content: []Content{ToolResultBlock{CallID: "tool-1", Content: []Content{TextBlock{Text: "edited"}}}}},
+	}
+
+	out := normalizeBedrockToolResults(msgs)
+	if len(out) != 3 {
+		t.Fatalf("got %d messages, want 3: %+v", len(out), out)
+	}
+	if out[0].Role != RoleAssistant {
+		t.Fatalf("first role = %s, want assistant", out[0].Role)
+	}
+	if out[1].Role != RoleTool {
+		t.Fatalf("second role = %s, want tool", out[1].Role)
+	}
+	tr, ok := out[1].Content[0].(ToolResultBlock)
+	if !ok {
+		t.Fatalf("second message content = %T, want ToolResultBlock", out[1].Content[0])
+	}
+	if tr.CallID != "tool-1" || tr.IsError {
+		t.Fatalf("unexpected tool result: %+v", tr)
+	}
+	if out[2].Role != RoleUser {
+		t.Fatalf("third role = %s, want user", out[2].Role)
+	}
+}
+
+func TestNormalizeBedrockToolResultsInjectsMissingResult(t *testing.T) {
+	msgs := []Message{
+		{Role: RoleAssistant, Content: []Content{ToolCallBlock{ID: "tool-1", Name: "edit", Arguments: json.RawMessage(`{}`)}}},
+		{Role: RoleUser, Content: []Content{TextBlock{Text: "what's wrong"}}},
+	}
+
+	out := normalizeBedrockToolResults(msgs)
+	if len(out) != 3 {
+		t.Fatalf("got %d messages, want 3: %+v", len(out), out)
+	}
+	tr, ok := out[1].Content[0].(ToolResultBlock)
+	if !ok {
+		t.Fatalf("second message content = %T, want ToolResultBlock", out[1].Content[0])
+	}
+	if tr.CallID != "tool-1" || !tr.IsError {
+		t.Fatalf("unexpected synthetic result: %+v", tr)
+	}
+}
+
+func TestBedrockBuildRequestSkipsEmptyToolMessages(t *testing.T) {
+	client := &bedrockClient{}
+	req, err := client.buildRequest(Request{Messages: []Message{
+		{Role: RoleTool, Content: []Content{ToolResultBlock{CallID: "missing", Content: []Content{TextBlock{Text: "orphan"}}}}},
+		{Role: RoleUser, Content: []Content{TextBlock{Text: "hello"}}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Messages) != 1 {
+		t.Fatalf("got %d bedrock messages, want 1: %+v", len(req.Messages), req.Messages)
+	}
+	if req.Messages[0].Role != "user" {
+		t.Fatalf("role = %s, want user", req.Messages[0].Role)
 	}
 }
 

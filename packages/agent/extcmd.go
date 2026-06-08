@@ -269,12 +269,24 @@ func extInstall(args []string) error {
 	if _, err := os.Stat(filepath.Join(src, "extension.json")); err != nil {
 		return fmt.Errorf("source lacks extension.json")
 	}
-	name := filepath.Base(src)
+	// Resolve to an absolute, cleaned path before deriving the install
+	// name. Otherwise relative sources like "." or "./" collapse to a
+	// basename of ".", and the destination wrongly resolves to the
+	// extensions/ parent directory (which zot creates on first run),
+	// triggering a false "already exists" failure.
+	absSrc, err := filepath.Abs(src)
+	if err != nil {
+		return err
+	}
+	name := filepath.Base(absSrc)
+	if name == "." || name == ".." || name == string(filepath.Separator) || name == "" {
+		return fmt.Errorf("cannot derive extension name from %q", src)
+	}
 	out := filepath.Join(dest, name)
 	if _, err := os.Stat(out); err == nil {
 		return fmt.Errorf("destination %s already exists; remove it first", out)
 	}
-	if err := copyDir(src, out); err != nil {
+	if err := copyDir(absSrc, out); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "installed %s\n", out)
@@ -311,7 +323,14 @@ func dashIfEmpty(s string) string {
 
 // copyDir does a recursive copy of src to dst preserving file mode
 // bits. Used by `zot ext install <local-path>`.
+//
+// Entries matched by the source's root .gitignore are skipped, and
+// .git itself is always skipped. This keeps non-portable, regeneratable
+// directories (e.g. .venv with hardcoded rpaths, node_modules, target/)
+// out of the installed copy so the extension stays functional at its new
+// location.
 func copyDir(src, dst string) error {
+	ig := loadGitignore(src)
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -319,6 +338,18 @@ func copyDir(src, dst string) error {
 		rel, err := filepath.Rel(src, path)
 		if err != nil {
 			return err
+		}
+		if rel != "." {
+			name := filepath.Base(rel)
+			if info.IsDir() && name == ".git" {
+				return filepath.SkipDir
+			}
+			if ig.match(filepath.ToSlash(rel), info.IsDir()) {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
 		}
 		target := filepath.Join(dst, rel)
 		if info.IsDir() {
@@ -337,4 +368,100 @@ func copyDir(src, dst string) error {
 		_, err = io.Copy(out, in)
 		return err
 	})
+}
+
+// gitignore is a minimal .gitignore matcher. It supports the common
+// patterns used in real extension repos: blank lines, comments (#),
+// negation (!), directory-only patterns (trailing /), anchored
+// patterns (leading /), and the * / ? / [..] wildcards via
+// filepath.Match. It intentionally does not implement ** globstar or
+// nested per-directory .gitignore files; the goal is to drop obvious
+// non-portable directories, not to be a faithful git reimplementation.
+type gitignore struct {
+	rules []gitignoreRule
+}
+
+type gitignoreRule struct {
+	pattern  string
+	negate   bool
+	dirOnly  bool
+	anchored bool
+}
+
+func loadGitignore(root string) *gitignore {
+	data, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		return &gitignore{}
+	}
+	return loadGitignoreFromString(string(data))
+}
+
+func loadGitignoreFromString(data string) *gitignore {
+	g := &gitignore{}
+	for _, line := range strings.Split(data, "\n") {
+		line = strings.TrimRight(line, "\r")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		r := gitignoreRule{pattern: trimmed}
+		if strings.HasPrefix(r.pattern, "!") {
+			r.negate = true
+			r.pattern = r.pattern[1:]
+		}
+		if strings.HasSuffix(r.pattern, "/") {
+			r.dirOnly = true
+			r.pattern = strings.TrimSuffix(r.pattern, "/")
+		}
+		if strings.HasPrefix(r.pattern, "/") {
+			r.anchored = true
+			r.pattern = strings.TrimPrefix(r.pattern, "/")
+		}
+		if r.pattern == "" {
+			continue
+		}
+		g.rules = append(g.rules, r)
+	}
+	return g
+}
+
+// match reports whether the slash-separated relative path should be
+// ignored. Later rules win, so a trailing negation can re-include a
+// previously ignored path.
+func (g *gitignore) match(rel string, isDir bool) bool {
+	ignored := false
+	for _, r := range g.rules {
+		if r.dirOnly && !isDir {
+			continue
+		}
+		if r.matchPath(rel) {
+			ignored = !r.negate
+		}
+	}
+	return ignored
+}
+
+func (r gitignoreRule) matchPath(rel string) bool {
+	if r.anchored || strings.Contains(r.pattern, "/") {
+		if ok, _ := filepath.Match(r.pattern, rel); ok {
+			return true
+		}
+		// Anchored directory pattern also matches everything beneath it.
+		return strings.HasPrefix(rel, r.pattern+"/")
+	}
+	// Unanchored: match the basename of any path component.
+	base := rel
+	if i := strings.LastIndex(rel, "/"); i >= 0 {
+		base = rel[i+1:]
+	}
+	if ok, _ := filepath.Match(r.pattern, base); ok {
+		return true
+	}
+	// Match a directory component anywhere in the path.
+	for _, part := range strings.Split(rel, "/") {
+		if ok, _ := filepath.Match(r.pattern, part); ok {
+			return true
+		}
+	}
+	return false
 }
