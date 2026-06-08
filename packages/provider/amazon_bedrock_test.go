@@ -357,6 +357,75 @@ func TestBedrockBuildRequestCachingWireJSON(t *testing.T) {
 	}
 }
 
+// TestBedrockBuildRequestBtwToolHistory reproduces the /btw HTTP 400 bug:
+// the side-chat sends no tools but the frozen main transcript contains
+// toolUse / toolResult blocks. Bedrock rejects such a request unless
+// toolConfig is present. buildRequest must inject a stub toolConfig.
+func TestBedrockBuildRequestBtwToolHistory(t *testing.T) {
+	client := &bedrockClient{region: "us-east-1"}
+	req, err := client.buildRequest(Request{
+		Model: "amazon.nova-pro-v1:0",
+		// No tools — simulates /btw side-chat.
+		Messages: []Message{
+			// Frozen main transcript: one tool call + result already happened.
+			{Role: RoleAssistant, Content: []Content{
+				ToolCallBlock{ID: "tc-1", Name: "bash", Arguments: json.RawMessage(`{"command":"ls"}`)},
+			}},
+			{Role: RoleTool, Content: []Content{
+				ToolResultBlock{CallID: "tc-1", Content: []Content{TextBlock{Text: "file.go"}}},
+			}},
+			// Side-chat question appended by btwDialog.submit.
+			{Role: RoleUser, Content: []Content{TextBlock{Text: "what does that file do?"}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.ToolConfig == nil {
+		t.Fatal("buildRequest should inject a stub toolConfig when history has tool blocks and req.Tools is empty, but ToolConfig is nil")
+	}
+	if len(req.ToolConfig.Tools) == 0 {
+		t.Fatal("stub toolConfig should have at least one tool")
+	}
+	// The stub must have a valid name and a non-nil schema so Bedrock won't
+	// reject it for a different reason.
+	stub := req.ToolConfig.Tools[0]
+	if stub.ToolSpec.Name == "" {
+		t.Error("stub tool name must not be empty")
+	}
+	if stub.ToolSpec.InputSchema.JSON == nil {
+		t.Error("stub tool schema must not be nil")
+	}
+	// Serialised wire payload must include toolConfig.
+	b, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"toolConfig"`) {
+		t.Errorf("serialised request missing toolConfig: %s", b)
+	}
+}
+
+// TestBedrockBuildRequestNoToolHistoryNoStub ensures that when there are
+// no tool blocks in the history and no tools in the request (ordinary
+// conversational call), we do NOT inject a toolConfig at all — the extra
+// field is unnecessary and some models may behave differently with it.
+func TestBedrockBuildRequestNoToolHistoryNoStub(t *testing.T) {
+	client := &bedrockClient{region: "us-east-1"}
+	req, err := client.buildRequest(Request{
+		Model: "amazon.nova-pro-v1:0",
+		Messages: []Message{
+			{Role: RoleUser, Content: []Content{TextBlock{Text: "hello"}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.ToolConfig != nil {
+		t.Errorf("expected nil ToolConfig for plain conversation, got: %+v", req.ToolConfig)
+	}
+}
+
 func TestBedrockBuildRequestSkipsEmptyToolMessages(t *testing.T) {
 	client := &bedrockClient{}
 	req, err := client.buildRequest(Request{Messages: []Message{

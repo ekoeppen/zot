@@ -299,6 +299,24 @@ func bedrockModelSupportsCaching(modelID string) bool {
 	return strings.HasPrefix(modelID, "anthropic.claude-")
 }
 
+// bedrockMessagesHaveToolBlocks reports whether any message in msgs
+// contains a toolUse or toolResult content block. Bedrock's Converse API
+// rejects the request with HTTP 400 if those block types are present but
+// toolConfig is absent.
+func bedrockMessagesHaveToolBlocks(msgs []bedrockMessage) bool {
+	for _, m := range msgs {
+		for _, c := range m.Content {
+			if _, ok := c["toolUse"]; ok {
+				return true
+			}
+			if _, ok := c["toolResult"]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (c *bedrockClient) buildRequest(req Request) (*bedrockRequest, error) {
 	out := &bedrockRequest{}
 
@@ -380,6 +398,21 @@ func (c *bedrockClient) buildRequest(req Request) (*bedrockRequest, error) {
 			tc.Tools = append(tc.Tools, ts)
 		}
 		out.ToolConfig = &tc
+	} else if bedrockMessagesHaveToolBlocks(out.Messages) {
+		// Bedrock requires toolConfig to be present whenever the message
+		// history contains toolUse or toolResult content blocks, even if
+		// the current request does not intend to call any tools (e.g. the
+		// /btw side-chat sends the frozen main transcript which may include
+		// prior tool turns). Inject a stub tool so the API accepts the
+		// request; it will never be invoked since no tool_use stop reason
+		// can be triggered when the real tool list is empty.
+		var stub bedrockToolSpec
+		stub.ToolSpec.Name = "_placeholder"
+		stub.ToolSpec.Description = "placeholder required by Bedrock when tool history is present"
+		stub.ToolSpec.InputSchema.JSON = json.RawMessage(`{"type":"object","properties":{}}`)
+		out.ToolConfig = &struct {
+			Tools []bedrockToolSpec `json:"tools"`
+		}{Tools: []bedrockToolSpec{stub}}
 	}
 
 	if caching {
