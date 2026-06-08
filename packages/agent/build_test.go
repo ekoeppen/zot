@@ -111,6 +111,37 @@ func TestResolveExplicitFlagStaleDoesNotRepairConfig(t *testing.T) {
 	}
 }
 
+// TestResolveEnvOnlyBedrockDiscoveredWithoutConfig reproduces issue
+// #15: pointing ZOT_HOME at a fresh dir drops the persisted
+// config.json (which pinned provider=amazon-bedrock). Resolve must
+// still discover bedrock from the AWS env vars instead of falling back
+// to anthropic and reporting "not logged in".
+func TestResolveEnvOnlyBedrockDiscoveredWithoutConfig(t *testing.T) {
+	t.Setenv("ZOT_HOME", t.TempDir()) // fresh home: no config.json
+	// Disable the Kimi CLI token fallback so a developer machine with a
+	// real Kimi CLI login doesn't pre-empt bedrock in the scan.
+	if err := SetKimiCLIFallbackDisabled(true); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-bedrock-token")
+	t.Setenv("AWS_REGION", "us-east-1")
+	// Make sure no other provider's env credential pre-empts bedrock.
+	for _, k := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "DEEPSEEK_API_KEY", "KIMI_API_KEY", "MOONSHOT_API_KEY"} {
+		t.Setenv(k, "")
+	}
+
+	r, err := Resolve(Args{}, true)
+	if err != nil {
+		t.Fatalf("Resolve errored with env-only bedrock: %v", err)
+	}
+	if r.Provider != "amazon-bedrock" {
+		t.Fatalf("provider = %q, want amazon-bedrock", r.Provider)
+	}
+	if !r.HasCredential() {
+		t.Fatalf("bedrock credential not resolved from env")
+	}
+}
+
 func TestResolveOllamaUsesModelBaseURLBeforeDefault(t *testing.T) {
 	t.Setenv("ZOT_HOME", t.TempDir())
 	provider.SetLiveModels(nil)
