@@ -36,6 +36,15 @@ var recursiveSkipDirs = map[string]bool{
 	".idea":        true,
 	".vscode":      true,
 	"__pycache__":  true,
+	// Infrastructure-as-code provider/module caches. These hold copies
+	// of downloaded providers and generated module trees and can grow
+	// to hundreds of MB or deeply nested duplicates of the source.
+	".terraform":        true,
+	".terragrunt-cache": true,
+	".terraform.d":      true,
+	".pulumi":           true,
+	".serverless":       true,
+	"cdk.out":           true,
 }
 
 // fileSuggester provides an @-triggered file/directory picker popup.

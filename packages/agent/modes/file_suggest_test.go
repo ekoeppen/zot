@@ -171,6 +171,39 @@ func TestFileSuggesterRecursiveSkipsHeavyDirs(t *testing.T) {
 	}
 }
 
+// TestFileSuggesterRecursiveSkipsIaCCaches ensures infrastructure-as-
+// code provider/module caches are pruned so a recursive walk doesn't
+// drown in copies of downloaded providers or generated modules.
+func TestFileSuggesterRecursiveSkipsIaCCaches(t *testing.T) {
+	tmp := t.TempDir()
+	for _, dir := range []string{".terraform", ".terragrunt-cache", "cdk.out"} {
+		nested := filepath.Join(tmp, dir, "deep")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(nested, "junk.tf"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "main.tf"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := newFileSuggester()
+	s.SetCWD(tmp)
+	s.SetRecursive(true)
+
+	for _, e := range s.scan() {
+		for _, skip := range []string{".terraform", ".terragrunt-cache", "cdk.out"} {
+			if e.rel == skip || strings.HasPrefix(e.rel, skip+string(filepath.Separator)) {
+				t.Fatalf("recursive scan descended into %s: %#v", skip, e)
+			}
+		}
+	}
+	if !containsEntry(s.scan(), "main.tf", false) {
+		t.Fatal("recursive scan missing main.tf")
+	}
+}
+
 // TestFileSuggesterToggleResetsCache verifies SetRecursive drops the
 // cached scan so the next matches() reflects the new mode.
 func TestFileSuggesterToggleResetsCache(t *testing.T) {
