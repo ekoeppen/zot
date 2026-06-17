@@ -593,7 +593,7 @@ func TestBedrockBuildRequestImageInToolResult(t *testing.T) {
 				},
 			},
 			{
-				Role: RoleUser,
+				Role:    RoleUser,
 				Content: []Content{TextBlock{Text: "what's in the image?"}},
 			},
 		},
