@@ -537,6 +537,7 @@ func (m *Manager) spawn(ctx context.Context, ext *Extension) error {
 	cmd := exec.CommandContext(ctx, execPath, ext.Manifest.Args...)
 	cmd.Dir = ext.Dir
 	cmd.Stderr = logFile
+	isolateExtensionProcess(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
