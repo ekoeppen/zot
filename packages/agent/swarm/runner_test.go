@@ -3,6 +3,7 @@ package swarm
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestSwarmAgentArgs locks in the exact flag set the subprocess
@@ -120,6 +121,45 @@ func TestDefaultChildArgsResumeOmitsTask(t *testing.T) {
 	}
 	if strings.HasPrefix(args[len(args)-1], "--") {
 		t.Fatalf("resume argv ends on a bare flag (no value): %v", args)
+	}
+}
+
+func TestNotifyPromptTurnEndIgnoresProviderToolLoopTurnEnd(t *testing.T) {
+	called := make(chan struct{}, 1)
+	a := &Agent{}
+	a.SetOnTurnEnd(func(step int, errMsg string) {
+		called <- struct{}{}
+	})
+
+	notifyPromptTurnEnd(a, NewEvent("turn_end", map[string]any{"stop": "tool_use"}))
+
+	select {
+	case <-called:
+		t.Fatal("OnTurnEnd fired for provider/tool-loop turn_end without step")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestNotifyPromptTurnEndFiresForDaemonPromptCompletion(t *testing.T) {
+	type got struct {
+		step int
+		err  string
+	}
+	called := make(chan got, 1)
+	a := &Agent{}
+	a.SetOnTurnEnd(func(step int, errMsg string) {
+		called <- got{step: step, err: errMsg}
+	})
+
+	notifyPromptTurnEnd(a, NewEvent("turn_end", map[string]any{"step": float64(2), "error": "boom"}))
+
+	select {
+	case g := <-called:
+		if g.step != 2 || g.err != "boom" {
+			t.Fatalf("callback = (%d, %q); want (2, boom)", g.step, g.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("OnTurnEnd did not fire for prompt-level turn_end with step")
 	}
 }
 

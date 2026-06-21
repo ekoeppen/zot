@@ -5103,12 +5103,13 @@ func (i *Interactive) TrackSwarmAgent(a *swarm.Agent, task string) {
 }
 
 // trackSwarmAgent records a freshly-spawned auto-swarm agent and
-// subscribes to its turn_end events. Sub-agents are long-lived
-// daemons that keep running on the inbox after the initial task,
-// so we can't wait on agent.Wait() — it never returns until the
-// whole daemon dies. Instead we mark each entry done on its first
-// turn_end (the initial task finishing), and when every tracked
-// entry has reported in, flush a single summary into the main chat.
+// subscribes to its prompt-level task completion events. Sub-agents
+// are long-lived daemons that keep running on the inbox after the
+// initial task, so we can't wait on agent.Wait() — it never returns
+// until the whole daemon dies. Instead we mark each entry done when
+// the swarm daemon reports the initial prompt has finished, and when
+// every tracked entry has reported in, flush a single summary into
+// the main chat.
 //
 // Wired in from cli.go via SwarmSpawnTool.OnSpawned only when auto-
 // swarm is enabled, so this is a no-op when the feature is off.

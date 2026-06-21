@@ -209,21 +209,13 @@ func (r *execRunner) Run(ctx context.Context, sink Sink) error {
 				if ev, ok := parseEventLine(trimmed); ok {
 					_ = log.Append(ev)
 					applyEventToSink(ev, sink)
-					// Fan turn_end up to any subscriber on the
-					// supervised Agent. Daemons stay alive across
-					// many turns, so Wait()-style hooks would
-					// never fire; per-turn callbacks let auto-
-					// swarm summarise as each task completes.
-					if ev.Type == "turn_end" && r.agent != nil {
-						r.agent.mu.Lock()
-						fn := r.agent.OnTurnEnd
-						r.agent.mu.Unlock()
-						if fn != nil {
-							step, _ := ev.Data["step"].(float64)
-							errMsg, _ := ev.Data["error"].(string)
-							go fn(int(step), errMsg)
-						}
-					}
+					// Fan prompt-level task completions up to any
+					// subscriber on the supervised Agent. The child
+					// also forwards provider/tool-loop turn_end
+					// events (for example stop=tool_use); those do
+					// not contain step and must not be treated as
+					// swarm task completion.
+					notifyPromptTurnEnd(r.agent, ev)
 				} else {
 					// Non-JSON output. Keep it as transcript so an
 					// accidental fmt.Println in the child still
@@ -299,6 +291,28 @@ func parseEventLine(line string) (Event, bool) {
 		ev.Time = time.Now()
 	}
 	return ev, true
+}
+
+// notifyPromptTurnEnd calls Agent.OnTurnEnd only for the swarm
+// daemon's prompt-level completion event. Provider/tool-loop
+// turn_end events (such as stop=tool_use) do not include step and
+// are not terminal for the delegated task.
+func notifyPromptTurnEnd(a *Agent, ev Event) {
+	if a == nil || ev.Type != "turn_end" {
+		return
+	}
+	step, ok := ev.Data["step"].(float64)
+	if !ok {
+		return
+	}
+
+	a.mu.Lock()
+	fn := a.OnTurnEnd
+	a.mu.Unlock()
+	if fn != nil {
+		errMsg, _ := ev.Data["error"].(string)
+		go fn(int(step), errMsg)
+	}
 }
 
 // applyEventToSink translates an Event into Sink updates. Only a
