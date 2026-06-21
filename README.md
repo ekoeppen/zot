@@ -576,7 +576,7 @@ Slash commands also work while the agent is busy. Read-only ones (`/help`, `/jum
 | `ctrl+c` | Clear the input and queue (while idle) or arm the exit hint (while busy). Press again within 2s to exit. Use `esc` to cancel a running turn. |
 | `ctrl+d` | Exit on empty input. |
 | `ctrl+l` | Redraw the screen. |
-| `ctrl+v` | Paste from the system clipboard through zot. Text is inserted normally; images are saved as temporary PNGs and attached to the next prompt. |
+| `ctrl+v` | Paste an image from the system clipboard through zot on macOS. Images are saved as temporary PNGs and attached to the next prompt. Other platforms currently use a no-op stub. Use your terminal/OS paste shortcut for text. |
 | `ctrl+o` | Expand or collapse long tool results (read, write, edit, bash outputs over ~12 lines). |
 | `@` | Open the file picker. Browse files and directories in the working directory. |
 

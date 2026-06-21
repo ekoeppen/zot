@@ -425,7 +425,7 @@ type Interactive struct {
 	pendingRescuePrompt string
 	pendingRescueImages []provider.ImageBlock
 
-	clipboardImages []provider.ImageBlock
+	clipboardImages []clipboardImageAttachment
 }
 
 // welcomeVersionDuration is how long the welcome banner shows the
@@ -2231,10 +2231,10 @@ func (i *Interactive) handleKey(ctx context.Context, k tui.Key) (done bool) {
 		text := strings.TrimRight(i.ed.SubmitValue(), "\n")
 		// Expand [file:name] and [dir:name/] chips to full paths.
 		text = expandFileChips(text, i.cfg.CWD)
-		if text == "" {
+		text, images := preparePromptWithClipboardImages(text, i.clipboardImages)
+		if text == "" && len(images) == 0 {
 			return false
 		}
-		images := append([]provider.ImageBlock(nil), i.clipboardImages...)
 		i.clipboardImages = nil
 		i.ed.Clear()
 		i.inputHistoryIndex = -1
@@ -2325,7 +2325,7 @@ func (i *Interactive) handleKey(ctx context.Context, k tui.Key) (done bool) {
 }
 
 func (i *Interactive) pasteClipboard() {
-	path, data, ok, err := tui.ReadClipboardImagePNG()
+	_, data, ok, err := tui.ReadClipboardImagePNG()
 	if err != nil {
 		i.mu.Lock()
 		i.statusErr = "clipboard paste failed: " + err.Error()
@@ -2335,29 +2335,21 @@ func (i *Interactive) pasteClipboard() {
 	}
 	if ok {
 		i.mu.Lock()
-		i.clipboardImages = append(i.clipboardImages, provider.ImageBlock{MimeType: "image/png", Data: data})
-		i.ed.Insert("[image:" + path + "]")
-		i.statusOK = "pasted clipboard image to " + path
+		marker := fmt.Sprintf("[clipboard image #%d]", len(i.clipboardImages)+1)
+		i.clipboardImages = append(i.clipboardImages, clipboardImageAttachment{
+			Marker: marker,
+			Image:  provider.ImageBlock{MimeType: "image/png", Data: data},
+		})
+		i.ed.Insert(marker + " ")
+		i.statusOK = ""
 		i.statusErr = ""
 		i.mu.Unlock()
 		return
 	}
-	text, textOK, err := tui.ReadClipboardText()
 	i.mu.Lock()
-	defer i.mu.Unlock()
-	if err != nil {
-		i.statusErr = "clipboard paste failed: " + err.Error()
-		i.statusOK = ""
-		return
-	}
-	if !textOK || text == "" {
-		i.statusErr = "clipboard does not contain text or an image"
-		i.statusOK = ""
-		return
-	}
-	i.ed.HandleKey(tui.Key{Kind: tui.KeyPaste, Paste: text})
+	i.statusErr = "clipboard does not contain an image"
 	i.statusOK = ""
-	i.statusErr = ""
+	i.mu.Unlock()
 }
 
 func (i *Interactive) handleInputHistoryKey(k tui.Key) bool {
