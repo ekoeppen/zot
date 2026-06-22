@@ -90,3 +90,31 @@ func TestPreparePromptWithClipboardImagesDuplicateMarkerAttachesOnce(t *testing.
 		t.Fatalf("len(images) = %d, want 1", len(images))
 	}
 }
+
+func TestPreparePromptWithClipboardImagesNoPendingPreservesWhitespace(t *testing.T) {
+	input := "please review:\n\nfunc main() {\n\tfmt.Println(\"hi\")\n}\n"
+
+	text, images := preparePromptWithClipboardImages(input, nil)
+
+	if text != input {
+		t.Fatalf("text changed without pending images:\n got %q\nwant %q", text, input)
+	}
+	if images != nil {
+		t.Fatalf("images = %#v, want nil", images)
+	}
+}
+
+func TestPreparePromptWithClipboardImagesPreservesMultilinePrompt(t *testing.T) {
+	pending := []clipboardImageAttachment{testClipboardImage("[clipboard image #1]", "png-1")}
+	input := "compare this image [clipboard image #1]\n\nwith this code:\n\treturn 1"
+	want := "compare this image\n\nwith this code:\n\treturn 1"
+
+	text, images := preparePromptWithClipboardImages(input, pending)
+
+	if text != want {
+		t.Fatalf("text = %q, want %q", text, want)
+	}
+	if len(images) != 1 {
+		t.Fatalf("len(images) = %d, want 1", len(images))
+	}
+}

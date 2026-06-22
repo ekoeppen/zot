@@ -74,7 +74,13 @@ func ReadClipboardImagePNG() (string, []byte, bool, error) {
 			return "", nil, false, err
 		}
 	default:
-		return "", nil, false, fmt.Errorf("unexpected clipboard image kind %q", kind)
+		clipPath, ok := findClipboardImagePath(kind)
+		if !ok {
+			return "", nil, false, fmt.Errorf("unexpected clipboard image kind %q", kind)
+		}
+		if err := copyClipboardImageFileToPNG(clipPath, path); err != nil {
+			return "", nil, false, err
+		}
 	}
 
 	data, err := os.ReadFile(path)
@@ -92,6 +98,12 @@ func writeClipboardImageData(path string) (string, error) {
 		if strings.Contains(trimmed, "NO_IMAGE") || strings.Contains(trimmed, "Can’t make") || strings.Contains(trimmed, "Can't make") {
 			return "", nil
 		}
+		if kind, ok := clipboardImageKind(trimmed); ok {
+			return kind, nil
+		}
+		if path, ok := findClipboardImagePath(trimmed); ok {
+			return path, nil
+		}
 		if trimmed == "" {
 			return "", fmt.Errorf("osascript failed: %w", err)
 		}
@@ -100,7 +112,84 @@ func writeClipboardImageData(path string) (string, error) {
 	if trimmed == "NO_IMAGE" {
 		return "", nil
 	}
+	if kind, ok := clipboardImageKind(trimmed); ok {
+		return kind, nil
+	}
 	return trimmed, nil
+}
+
+func clipboardImageKind(s string) (string, bool) {
+	for _, line := range strings.Split(s, "\n") {
+		switch strings.TrimSpace(line) {
+		case "png":
+			return "png", true
+		case "tiff":
+			return "tiff", true
+		}
+	}
+	return "", false
+}
+
+func copyClipboardImageFileToPNG(srcPath, dstPath string) error {
+	switch strings.ToLower(filepath.Ext(srcPath)) {
+	case ".png":
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dstPath, data, 0o600)
+	case ".tif", ".tiff":
+		return convertTIFFFileToPNG(srcPath, dstPath)
+	default:
+		return fmt.Errorf("clipboard file is not a supported image type: %s", srcPath)
+	}
+}
+
+func findClipboardImagePath(s string) (string, bool) {
+	if p, ok := clipboardImagePath(s); ok {
+		return p, true
+	}
+	for _, ext := range []string{".png", ".tiff", ".tif"} {
+		lower := strings.ToLower(s)
+		end := strings.Index(lower, ext)
+		if end < 0 {
+			continue
+		}
+		end += len(ext)
+		start := strings.LastIndex(s[:end], "/")
+		if start < 0 {
+			continue
+		}
+		for start > 0 {
+			c := s[start-1]
+			if c == '\'' || c == '"' || c == '\n' || c == '\r' || c == '\t' {
+				break
+			}
+			start--
+		}
+		if p, ok := clipboardImagePath(s[start:end]); ok {
+			return p, true
+		}
+	}
+	return "", false
+}
+
+func clipboardImagePath(s string) (string, bool) {
+	p := strings.TrimSpace(s)
+	p = strings.Trim(p, "'\"")
+	if p == "" {
+		return "", false
+	}
+	info, err := os.Stat(p)
+	if err != nil || info.IsDir() {
+		return "", false
+	}
+	switch strings.ToLower(filepath.Ext(p)) {
+	case ".png", ".tif", ".tiff":
+		return p, true
+	default:
+		return "", false
+	}
 }
 
 func convertTIFFFileToPNG(srcPath, dstPath string) error {
