@@ -4,6 +4,31 @@ import "github.com/patriceckhart/zot/packages/provider"
 
 type configSettingsStore struct{}
 
+func (configSettingsStore) SetQuickModelShortcut(slot int, providerName, model string) error {
+	if slot < 1 || slot > 9 {
+		return nil
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	if len(cfg.QuickModelShortcuts) < slot {
+		next := make([]QuickModelShortcut, slot)
+		copy(next, cfg.QuickModelShortcuts)
+		cfg.QuickModelShortcuts = next
+	}
+	cfg.QuickModelShortcuts[slot-1] = QuickModelShortcut{Provider: providerName, Model: model}
+	// Trim trailing empty slots so config.json stays compact.
+	for len(cfg.QuickModelShortcuts) > 0 {
+		last := cfg.QuickModelShortcuts[len(cfg.QuickModelShortcuts)-1]
+		if last.Provider != "" || last.Model != "" {
+			break
+		}
+		cfg.QuickModelShortcuts = cfg.QuickModelShortcuts[:len(cfg.QuickModelShortcuts)-1]
+	}
+	return SaveConfig(cfg)
+}
+
 func (configSettingsStore) SetInlineImages(enabled bool) error {
 	cfg, err := LoadConfig()
 	if err != nil {

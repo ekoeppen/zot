@@ -15,6 +15,12 @@ import (
 	"github.com/patriceckhart/zot/packages/provider/auth"
 )
 
+// QuickModelShortcut is one configured keyboard shortcut slot.
+type QuickModelShortcut struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
 // Config is the persisted user configuration.
 type Config struct {
 	Provider    string   `json:"provider"`
@@ -22,6 +28,10 @@ type Config struct {
 	Reasoning   string   `json:"reasoning"`
 	Temperature *float32 `json:"temperature,omitempty"`
 	Theme       string   `json:"theme"`
+
+	// QuickModelShortcuts maps slots 1-9 to provider/model pairs used by
+	// Ctrl+1..9. Cmd+1..9 may also work on terminals that forward Super.
+	QuickModelShortcuts []QuickModelShortcut `json:"quick_model_shortcuts,omitempty"`
 
 	// InlineImagesEnabled controls whether zot draws screenshots inline
 	// when the terminal supports an image protocol. nil/missing means

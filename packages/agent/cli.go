@@ -931,6 +931,10 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 	}()
 
 	initialCfg, _ := LoadConfig()
+	quickModelShortcuts := make([]modes.QuickModelShortcut, len(initialCfg.QuickModelShortcuts))
+	for idx, s := range initialCfg.QuickModelShortcuts {
+		quickModelShortcuts[idx] = modes.QuickModelShortcut{Provider: s.Provider, Model: s.Model}
+	}
 	theme, _, themeErr := tui.DetectThemeWithCustom(ZotHome(), initialCfg.Theme, 80*time.Millisecond)
 	if themeErr != nil {
 		fmt.Fprintln(os.Stderr, "theme load:", themeErr)
@@ -958,6 +962,7 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 		Theme:                      theme,
 		InlineImagesEnabled:        initialCfg.InlineImagesEnabled,
 		AutoSwarmEnabled:           initialCfg.AutoSwarmEnabled,
+		QuickModelShortcuts:        quickModelShortcuts,
 		RecursiveFileSuggest:       initialCfg.RecursiveFileSuggest,
 		RespectGitignore:           initialCfg.RespectGitignore,
 		ThemeName:                  initialCfg.Theme,

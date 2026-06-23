@@ -23,6 +23,34 @@ func TestReaderParsesCSIUCtrlC(t *testing.T) {
 	}
 }
 
+func TestReaderParsesCSIUCtrlNumber(t *testing.T) {
+	k := readKey(t, "\x1b[49;5u")
+	if k.Kind != KeyRune || k.Rune != '1' || !k.Ctrl {
+		t.Fatalf("Read kind=%v rune=%q ctrl=%v, want ctrl+1", k.Kind, k.Rune, k.Ctrl)
+	}
+}
+
+func TestReaderParsesCSIUSuperNumber(t *testing.T) {
+	k := readKey(t, "\x1b[50;9u")
+	if k.Kind != KeyRune || k.Rune != '2' || !k.Super {
+		t.Fatalf("Read kind=%v rune=%q super=%v, want super+2", k.Kind, k.Rune, k.Super)
+	}
+}
+
+func TestReaderParsesCSIUSuperNumberWithEventType(t *testing.T) {
+	k := readKey(t, "\x1b[51;9:3u")
+	if k.Kind != KeyRune || k.Rune != '3' || !k.Super {
+		t.Fatalf("Read kind=%v rune=%q super=%v, want super+3", k.Kind, k.Rune, k.Super)
+	}
+}
+
+func TestReaderParsesCSIUHyperNumberAsSuper(t *testing.T) {
+	k := readKey(t, "\x1b[52;33u")
+	if k.Kind != KeyRune || k.Rune != '4' || !k.Super {
+		t.Fatalf("Read kind=%v rune=%q super=%v, want hyper+4 as super", k.Kind, k.Rune, k.Super)
+	}
+}
+
 func TestReaderParsesRawCtrlVAsClipboardPaste(t *testing.T) {
 	k := readKey(t, "\x16")
 	if k.Kind != KeyPasteClipboard || !k.Ctrl {

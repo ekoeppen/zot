@@ -14,6 +14,7 @@ type Key struct {
 	Ctrl  bool
 	Alt   bool
 	Shift bool
+	Super bool
 }
 
 type KeyKind int
@@ -245,7 +246,7 @@ func (r *Reader) dispatchCSI(params string, final byte) Key {
 		return Key{Kind: KeyUnknown}
 	}
 
-	shift, alt := parseCSIModifiers(params)
+	shift, alt, super := parseCSIModifiers(params)
 	if final == 'u' {
 		if key, ok := parseCSIU(params); ok {
 			return key
@@ -258,13 +259,13 @@ func (r *Reader) dispatchCSI(params string, final byte) Key {
 	}
 	switch final {
 	case 'A':
-		return Key{Kind: KeyUp, Alt: alt, Shift: shift}
+		return Key{Kind: KeyUp, Alt: alt, Shift: shift, Super: super}
 	case 'B':
-		return Key{Kind: KeyDown, Alt: alt, Shift: shift}
+		return Key{Kind: KeyDown, Alt: alt, Shift: shift, Super: super}
 	case 'C':
-		return Key{Kind: KeyRight, Alt: alt, Shift: shift}
+		return Key{Kind: KeyRight, Alt: alt, Shift: shift, Super: super}
 	case 'D':
-		return Key{Kind: KeyLeft, Alt: alt, Shift: shift}
+		return Key{Kind: KeyLeft, Alt: alt, Shift: shift, Super: super}
 	case 'H':
 		return Key{Kind: KeyHome}
 	case 'F':
@@ -287,23 +288,20 @@ func (r *Reader) dispatchCSI(params string, final byte) Key {
 	return Key{Kind: KeyUnknown}
 }
 
-func parseCSIModifiers(params string) (shift, alt bool) {
+func parseCSIModifiers(params string) (shift, alt, super bool) {
 	if params == "" {
-		return false, false
+		return false, false, false
 	}
 	i := strings.LastIndexByte(params, ';')
 	if i < 0 || i+1 >= len(params) {
-		return false, false
+		return false, false, false
 	}
-	mod, err := strconv.Atoi(params[i+1:])
-	if err != nil {
-		return false, false
+	mod, ok := parseModifierParam(params[i+1:])
+	if !ok {
+		return false, false, false
 	}
-	// Xterm-style modifier values are 1 plus a bitmask:
-	// 2=Shift, 3=Alt, 4=Shift+Alt, 5=Ctrl, 6=Shift+Ctrl,
-	// 7=Alt+Ctrl, 8=Shift+Alt+Ctrl.
-	bits := mod - 1
-	return bits&1 != 0, bits&2 != 0
+	shift, alt, _, super = modifierBits(mod)
+	return shift, alt, super
 }
 
 func parseCSIU(params string) (Key, bool) {
@@ -317,7 +315,9 @@ func parseCSIU(params string) (Key, bool) {
 	}
 	mod := 1
 	if len(parts) >= 2 {
-		if mod, err = strconv.Atoi(parts[1]); err != nil {
+		var ok bool
+		mod, ok = parseModifierParam(parts[1])
+		if !ok {
 			return Key{}, false
 		}
 	}
@@ -329,8 +329,8 @@ func parseModifyOtherKeys(params string) (Key, bool) {
 	if len(parts) != 3 || parts[0] != "27" {
 		return Key{}, false
 	}
-	mod, err := strconv.Atoi(parts[1])
-	if err != nil {
+	mod, ok := parseModifierParam(parts[1])
+	if !ok {
 		return Key{}, false
 	}
 	code, err := strconv.Atoi(parts[2])
@@ -340,27 +340,40 @@ func parseModifyOtherKeys(params string) (Key, bool) {
 	return keyFromModifiedCode(code, mod)
 }
 
-func keyFromModifiedCode(code, mod int) (Key, bool) {
+func parseModifierParam(s string) (int, bool) {
+	if i := strings.IndexByte(s, ':'); i >= 0 {
+		s = s[:i]
+	}
+	mod, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, false
+	}
+	return mod, true
+}
+
+func modifierBits(mod int) (shift, alt, ctrl, super bool) {
 	bits := mod - 1
-	shift := bits&1 != 0
-	alt := bits&2 != 0
-	ctrl := bits&4 != 0
+	return bits&1 != 0, bits&2 != 0, bits&4 != 0, bits&8 != 0 || bits&32 != 0
+}
+
+func keyFromModifiedCode(code, mod int) (Key, bool) {
+	shift, alt, ctrl, super := modifierBits(mod)
 	// Kitty keyboard protocol (CSI ... u) reports control keys as their
 	// codepoints: Esc=27, Enter=13, Tab=9, Backspace=127. Without the
 	// enhanced-mode handling these arrive as raw bytes; with it enabled
 	// they come through here, so map them back to their dedicated keys.
 	switch code {
 	case 13:
-		return Key{Kind: KeyEnter, Shift: shift, Alt: alt, Ctrl: ctrl}, true
+		return Key{Kind: KeyEnter, Shift: shift, Alt: alt, Ctrl: ctrl, Super: super}, true
 	case 27:
-		return Key{Kind: KeyEsc, Shift: shift, Alt: alt, Ctrl: ctrl}, true
+		return Key{Kind: KeyEsc, Shift: shift, Alt: alt, Ctrl: ctrl, Super: super}, true
 	case 9:
 		if shift {
-			return Key{Kind: KeyShiftTab, Alt: alt, Ctrl: ctrl}, true
+			return Key{Kind: KeyShiftTab, Alt: alt, Ctrl: ctrl, Super: super}, true
 		}
-		return Key{Kind: KeyTab, Shift: shift, Alt: alt, Ctrl: ctrl}, true
+		return Key{Kind: KeyTab, Shift: shift, Alt: alt, Ctrl: ctrl, Super: super}, true
 	case 127, 8:
-		return Key{Kind: KeyBackspace, Shift: shift, Alt: alt, Ctrl: ctrl}, true
+		return Key{Kind: KeyBackspace, Shift: shift, Alt: alt, Ctrl: ctrl, Super: super}, true
 	}
 	if ctrl {
 		switch code {
@@ -385,6 +398,9 @@ func keyFromModifiedCode(code, mod int) (Key, bool) {
 		case 'v', 'V':
 			return Key{Kind: KeyPasteClipboard, Shift: shift, Alt: alt, Ctrl: true}, true
 		}
+	}
+	if code >= '0' && code <= '9' {
+		return Key{Kind: KeyRune, Rune: rune(code), Shift: shift, Alt: alt, Ctrl: ctrl, Super: super}, true
 	}
 	return Key{}, false
 }

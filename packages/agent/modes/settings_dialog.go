@@ -10,10 +10,13 @@ import (
 
 type settingsDialog struct {
 	active       bool
+	title        string
 	items        []settingsItem
 	cursor       int
 	selecting    bool
 	optionCursor int
+	parentItems  []settingsItem
+	parentCursor int
 }
 
 type settingsItem struct {
@@ -22,6 +25,8 @@ type settingsItem struct {
 	desc     string
 	value    bool
 	options  []settingsOption
+	children []settingsItem
+	picker   bool
 	choice   int
 	disabled bool
 	hint     string
@@ -34,11 +39,12 @@ type settingsOption struct {
 }
 
 type settingsAction struct {
-	Toggle      bool
-	Key         string
-	Value       bool
-	StringValue string
-	Close       bool
+	Toggle            bool
+	Key               string
+	Value             bool
+	StringValue       string
+	ModelShortcutSlot int
+	Close             bool
 }
 
 func newSettingsDialog() *settingsDialog { return &settingsDialog{} }
@@ -47,10 +53,13 @@ func (d *settingsDialog) Open(items []settingsItem) bool {
 	if len(items) == 0 {
 		return false
 	}
+	d.title = "settings"
 	d.items = items
 	d.cursor = 0
 	d.selecting = false
 	d.optionCursor = 0
+	d.parentItems = nil
+	d.parentCursor = 0
 	d.active = true
 	return true
 }
@@ -58,6 +67,7 @@ func (d *settingsDialog) Open(items []settingsItem) bool {
 func (d *settingsDialog) Close() {
 	d.active = false
 	d.selecting = false
+	d.parentItems = nil
 }
 func (d *settingsDialog) Active() bool { return d != nil && d.active }
 
@@ -74,7 +84,22 @@ func (d *settingsDialog) HandleKey(k tui.Key) settingsAction {
 		if d.cursor < len(d.items)-1 {
 			d.cursor++
 		}
+	case tui.KeyBackspace:
+		if len(d.items) > 0 {
+			it := d.items[d.cursor]
+			if strings.HasPrefix(it.key, "quick_model_") {
+				return settingsAction{Toggle: true, Key: it.key, StringValue: ""}
+			}
+		}
 	case tui.KeyEsc:
+		if len(d.parentItems) > 0 {
+			d.items = d.parentItems
+			d.cursor = d.parentCursor
+			d.parentItems = nil
+			d.parentCursor = 0
+			d.title = "settings"
+			return settingsAction{}
+		}
 		d.Close()
 		return settingsAction{Close: true}
 	case tui.KeyEnter:
@@ -119,6 +144,27 @@ func (d *settingsDialog) toggleCurrent() settingsAction {
 	if it.disabled {
 		return settingsAction{}
 	}
+	if it.picker {
+		slotText := strings.TrimPrefix(it.key, "quick_model_")
+		slot := 0
+		for _, r := range slotText {
+			if r < '0' || r > '9' {
+				slot = 0
+				break
+			}
+			slot = slot*10 + int(r-'0')
+		}
+		return settingsAction{ModelShortcutSlot: slot}
+	}
+	if len(it.children) > 0 {
+		d.parentItems = d.items
+		d.parentCursor = d.cursor
+		d.items = it.children
+		d.cursor = 0
+		d.optionCursor = 0
+		d.title = "settings: " + it.label
+		return settingsAction{}
+	}
 	if len(it.options) > 0 {
 		d.optionCursor = it.choice
 		if d.optionCursor < 0 || d.optionCursor >= len(it.options) {
@@ -159,15 +205,22 @@ func (d *settingsDialog) Render(th tui.Theme, width int) []string {
 		return d.renderOptions(th, width)
 	}
 	var lines []string
-	lines = append(lines, frameHeader(th, "settings", width))
-	lines = append(lines, th.FG256(th.Muted, "change with enter/space, esc to close:"))
+	lines = append(lines, frameHeader(th, d.title, width))
+	if len(d.parentItems) > 0 {
+		lines = append(lines, th.FG256(th.Muted, "change with enter/space, esc to go back:"))
+	} else {
+		lines = append(lines, th.FG256(th.Muted, "change with enter/space, esc to close:"))
+	}
 	for i, it := range d.items {
 		box := "[ ]"
 		if it.value {
 			box = "[✓]"
 		}
 		plain := "  " + box + " " + it.label
-		if len(it.options) > 0 {
+		if it.picker || len(it.children) > 0 {
+			box = "[→]"
+			plain = "  " + box + " " + it.label
+		} else if len(it.options) > 0 {
 			box = "[→]"
 			if it.choice < 0 || it.choice >= len(it.options) {
 				it.choice = 0

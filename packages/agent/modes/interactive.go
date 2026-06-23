@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -58,6 +60,12 @@ type InteractiveConfig struct {
 
 	// ThemeName mirrors the persisted config theme value. Empty means auto.
 	ThemeName string
+
+	// QuickModelShortcuts maps slots 1-9 to provider/model pairs. The
+	// shortcuts are Ctrl+1..9. Cmd+1..9 may also work when the terminal
+	// forwards Command/Super keypresses, but Ctrl is the displayed chord.
+	QuickModelShortcuts []QuickModelShortcut
+
 	// ExtensionThemes returns themes bundled with loaded extensions.
 	ExtensionThemes func() []tui.ThemeOption
 
@@ -234,8 +242,15 @@ type chatCacheKey struct {
 	tailLimit       int
 }
 
+// QuickModelShortcut is one configured quick model switch slot.
+type QuickModelShortcut struct {
+	Provider string
+	Model    string
+}
+
 // SettingsStore persists user-toggleable settings surfaced by /settings.
 type SettingsStore interface {
+	SetQuickModelShortcut(slot int, providerName, model string) error
 	SetInlineImages(enabled bool) error
 	SetAutoSwarm(enabled bool) error
 	SetRecursiveFileSuggest(enabled bool) error
@@ -353,6 +368,7 @@ type Interactive struct {
 	logoutDialog      *logoutDialog
 	telegramDialog    *telegramDialog
 	settingsDialog    *settingsDialog
+	quickModelAssign  int
 	telegramBridge    *telegram.Bridge
 	sessionOpsDialog  *sessionOpsDialog
 	sessionTreeDialog *sessionTreeDialog
@@ -1731,11 +1747,20 @@ func (i *Interactive) handleKey(ctx context.Context, k tui.Key) (done bool) {
 	if i.modelDialog.Active() {
 		if k.Kind == tui.KeyCtrlC {
 			i.modelDialog.Close()
+			i.quickModelAssign = 0
 			return false
 		}
 		act := i.modelDialog.HandleKey(k)
+		if act.Close {
+			i.quickModelAssign = 0
+		}
 		if act.Select {
-			i.applyModelSelection(act.Provider, act.Model)
+			if i.quickModelAssign > 0 {
+				i.applyQuickModelSelection(i.quickModelAssign, act.Provider, act.Model)
+				i.quickModelAssign = 0
+			} else {
+				i.applyModelSelection(act.Provider, act.Model)
+			}
 		}
 		return false
 	}
@@ -1818,6 +1843,9 @@ func (i *Interactive) handleKey(ctx context.Context, k tui.Key) (done bool) {
 			return false
 		}
 		act := i.settingsDialog.HandleKey(k)
+		if act.ModelShortcutSlot > 0 {
+			i.openQuickModelPicker(act.ModelShortcutSlot)
+		}
 		if act.Toggle {
 			i.applySettingChange(act)
 		}
@@ -1914,6 +1942,11 @@ func (i *Interactive) handleKey(ctx context.Context, k tui.Key) (done bool) {
 			}
 		}
 		i.invalidate()
+		return false
+	}
+
+	if slot := quickModelShortcutSlot(k); slot > 0 {
+		i.applyQuickModelShortcut(slot)
 		return false
 	}
 
@@ -2773,6 +2806,7 @@ func (i *Interactive) openSettingsDialog() {
 
 	recursiveFiles := i.cfg.RecursiveFileSuggest != nil && *i.cfg.RecursiveFileSuggest
 	respectGitignore := i.cfg.RespectGitignore == nil || *i.cfg.RespectGitignore
+	quickItems := i.quickModelSettingItems()
 
 	reasoningOptions := []settingsOption{
 		{value: "", label: "off", desc: "no reasoning"},
@@ -2820,7 +2854,7 @@ func (i *Interactive) openSettingsDialog() {
 		}
 	}
 
-	i.settingsDialog.Open([]settingsItem{
+	items := []settingsItem{
 		{
 			key:      "inline_images_enabled",
 			label:    "render images when supported",
@@ -2864,17 +2898,190 @@ func (i *Interactive) openSettingsDialog() {
 			options: themeOptions,
 			choice:  themeChoice,
 		},
-	})
+	}
+	if len(quickItems) > 0 {
+		items = append(items, settingsItem{
+			key:      "quick_models",
+			label:    "model shortcuts",
+			desc:     "configure " + quickModelShortcutPrefix() + "+1 through " + quickModelShortcutPrefix() + "+9 quick model switches",
+			children: quickItems,
+		})
+	}
+	i.settingsDialog.Open(items)
 }
 
 func (i *Interactive) applySettingChange(act settingsAction) {
-	switch act.Key {
-	case "reasoning":
+	switch {
+	case strings.HasPrefix(act.Key, "quick_model_"):
+		i.applyQuickModelSetting(act.Key, act.StringValue)
+	case act.Key == "reasoning":
 		i.applyReasoningSetting(act.StringValue)
-	case "theme":
+	case act.Key == "theme":
 		i.applyThemeSetting(act.StringValue)
 	default:
 		i.applySettingToggle(act.Key, act.Value)
+	}
+}
+
+func (i *Interactive) quickModelSettingItems() []settingsItem {
+	if len(i.cfg.QuickModelShortcuts) < 9 {
+		next := make([]QuickModelShortcut, 9)
+		copy(next, i.cfg.QuickModelShortcuts)
+		i.cfg.QuickModelShortcuts = next
+	}
+	items := make([]settingsItem, 0, 9)
+	for slot := 1; slot <= 9; slot++ {
+		items = append(items, i.quickModelSettingItem(slot))
+	}
+	return items
+}
+
+func (i *Interactive) quickModelSettingItem(slot int) settingsItem {
+	current := QuickModelShortcut{}
+	if slot >= 1 && len(i.cfg.QuickModelShortcuts) >= slot {
+		current = i.cfg.QuickModelShortcuts[slot-1]
+	}
+	hint := "not assigned"
+	if current.Provider != "" && current.Model != "" {
+		hint = current.Provider + " / " + current.Model
+	}
+	return settingsItem{
+		key:    "quick_model_" + strconv.Itoa(slot),
+		label:  "model " + strconv.Itoa(slot),
+		desc:   quickModelShortcutLabel(slot) + " switches to this model. Enter opens the /model selector, Backspace clears.",
+		picker: true,
+		hint:   hint,
+	}
+}
+
+func quickModelShortcutSlot(k tui.Key) int {
+	if k.Kind != tui.KeyRune || k.Rune < '1' || k.Rune > '9' {
+		return 0
+	}
+	if runtime.GOOS == "darwin" {
+		if !k.Super && !k.Ctrl {
+			return 0
+		}
+	} else if !k.Ctrl {
+		return 0
+	}
+	return int(k.Rune - '0')
+}
+
+func quickModelShortcutPrefix() string {
+	return "Ctrl"
+}
+
+func quickModelShortcutLabel(slot int) string {
+	return quickModelShortcutPrefix() + "+" + strconv.Itoa(slot)
+}
+
+func (i *Interactive) openQuickModelPicker(slot int) {
+	if slot < 1 || slot > 9 {
+		return
+	}
+	i.quickModelAssign = slot
+	current := i.cfg.Model
+	if len(i.cfg.QuickModelShortcuts) >= slot && i.cfg.QuickModelShortcuts[slot-1].Model != "" {
+		current = i.cfg.QuickModelShortcuts[slot-1].Model
+	}
+	var loggedIn []string
+	if i.cfg.LoggedInProviders != nil {
+		loggedIn = i.cfg.LoggedInProviders()
+	}
+	i.modelDialog.Open(current, loggedIn)
+}
+
+func (i *Interactive) applyQuickModelSelection(slot int, providerName, model string) {
+	i.setQuickModelShortcut(slot, providerName, model)
+}
+
+func (i *Interactive) applyQuickModelShortcut(slot int) {
+	if slot < 1 || slot > 9 {
+		return
+	}
+	if i.busy {
+		i.mu.Lock()
+		i.statusErr = "cannot switch model while a turn is running"
+		i.statusOK = ""
+		i.mu.Unlock()
+		i.invalidate()
+		return
+	}
+	if len(i.cfg.QuickModelShortcuts) < slot {
+		i.mu.Lock()
+		i.statusErr = quickModelShortcutLabel(slot) + " is not assigned"
+		i.statusOK = ""
+		i.mu.Unlock()
+		i.invalidate()
+		return
+	}
+	shortcut := i.cfg.QuickModelShortcuts[slot-1]
+	if shortcut.Provider == "" || shortcut.Model == "" {
+		i.mu.Lock()
+		i.statusErr = quickModelShortcutLabel(slot) + " is not assigned"
+		i.statusOK = ""
+		i.mu.Unlock()
+		i.invalidate()
+		return
+	}
+	i.swapModel(shortcut.Provider, shortcut.Model, i.cfg.BuildAgentFor, false)
+	i.invalidate()
+}
+
+func (i *Interactive) applyQuickModelSetting(key, value string) {
+	slotText := strings.TrimPrefix(key, "quick_model_")
+	slot, err := strconv.Atoi(slotText)
+	if err != nil || slot < 1 || slot > 9 {
+		return
+	}
+	providerName, model := "", ""
+	if value != "" {
+		parts := strings.SplitN(value, "\t", 2)
+		if len(parts) == 2 {
+			providerName, model = parts[0], parts[1]
+		}
+	}
+	i.setQuickModelShortcut(slot, providerName, model)
+}
+
+func (i *Interactive) setQuickModelShortcut(slot int, providerName, model string) {
+	if len(i.cfg.QuickModelShortcuts) < slot {
+		next := make([]QuickModelShortcut, slot)
+		copy(next, i.cfg.QuickModelShortcuts)
+		i.cfg.QuickModelShortcuts = next
+	}
+	i.cfg.QuickModelShortcuts[slot-1] = QuickModelShortcut{Provider: providerName, Model: model}
+	if i.cfg.SettingsStore != nil {
+		if err := i.cfg.SettingsStore.SetQuickModelShortcut(slot, providerName, model); err != nil {
+			i.mu.Lock()
+			i.statusErr = "settings: " + err.Error()
+			i.mu.Unlock()
+			return
+		}
+	}
+	i.mu.Lock()
+	if model == "" {
+		i.statusOK = quickModelShortcutLabel(slot) + " cleared"
+	} else {
+		i.statusOK = quickModelShortcutLabel(slot) + " set to " + providerName + " / " + model
+	}
+	i.statusErr = ""
+	i.mu.Unlock()
+	i.refreshQuickModelSettingsItem(slot)
+	i.invalidate()
+}
+
+func (i *Interactive) refreshQuickModelSettingsItem(slot int) {
+	if i.settingsDialog == nil || !i.settingsDialog.Active() || len(i.settingsDialog.items) == 0 {
+		return
+	}
+	key := "quick_model_" + strconv.Itoa(slot)
+	for idx, it := range i.settingsDialog.items {
+		if it.key == key {
+			i.settingsDialog.items[idx] = i.quickModelSettingItem(slot)
+			return
+		}
 	}
 }
 
