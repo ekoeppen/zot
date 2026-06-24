@@ -340,7 +340,7 @@ func PrintHelp(version string) {
 	if useColor {
 		headline = th.AccentBar(th.Assistant) + assistant(tui.Bold("i'm zot. yet another coding agent harness."))
 	} else {
-		headline = "i'm zot. yet another coding agent harness."
+		headline = "zot. yet another coding agent harness."
 	}
 	fmt.Fprintln(os.Stderr, headline)
 	fmt.Fprintln(os.Stderr, muted("ask anything, or type /help inside the tui to see commands."))
