@@ -3,7 +3,7 @@
 VERSION ?= 0.0.0
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build install test lint fmt clean release
+.PHONY: build install test lint fmt clean release run
 
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/zot ./cmd/zot
@@ -13,6 +13,9 @@ install:
 
 test:
 	go test -race ./...
+
+run: build
+	./bin/zot
 
 lint:
 	go vet ./...
