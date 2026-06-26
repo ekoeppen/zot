@@ -1,81 +1,66 @@
 package telegram
 
 import (
-	"context"
 	"strings"
-
-	"github.com/patriceckhart/zot/packages/agent/modes/bot"
-	"github.com/patriceckhart/zot/packages/core"
+	"unicode/utf8"
 )
-
-// Bot is a thin wrapper around bot.Runner + Adapter.  It exists to
-// keep the exported API stable for botcmd.go.
-//
-// Deprecated: Use telegram.NewAdapter + bot.NewRunner directly.
-// Bot is kept for backward compatibility but is no longer used internally.
-type Bot struct {
-	Client     *Client
-	Agent      *core.Agent
-	Config     Config
-	ZotHome    string
-	Provider   string
-	AuthMethod string
-	CWD        string
-	Save       func(Config) error
-	RefreshCreds func() error
-
-	runner  *bot.Runner
-	adapter *Adapter
-}
-
-// Run starts the bot.  It constructs the adapter and runner on first
-// call, then delegates to runner.Run.
-func (b *Bot) Run(ctx context.Context) error {
-	if b.adapter == nil {
-		b.adapter = NewAdapter(b.Client, &b.Config, b.Save)
-	}
-	if b.runner == nil {
-		b.runner = bot.NewRunner(b.adapter, b.Agent, bot.Config{
-			ZotHome:      b.ZotHome,
-			Provider:     b.Provider,
-			AuthMethod:   b.AuthMethod,
-			CWD:          b.CWD,
-			RefreshCreds: b.RefreshCreds,
-		})
-	}
-	return b.runner.Run(ctx)
-}
 
 // chunkMessage splits s into chunks no larger than limit runes, on line
 // boundaries when possible.
 func chunkMessage(s string, limit int) []string {
-	if len(s) <= limit {
+	if limit <= 0 || utf8.RuneCountInString(s) <= limit {
 		return []string{s}
 	}
 	var out []string
 	lines := strings.Split(s, "\n")
 	var cur strings.Builder
+	curRunes := 0
 	for _, l := range lines {
-		if cur.Len()+len(l)+1 > limit && cur.Len() > 0 {
+		lineRunes := utf8.RuneCountInString(l)
+		sepRunes := 0
+		if curRunes > 0 {
+			sepRunes = 1
+		}
+		if curRunes+sepRunes+lineRunes > limit && curRunes > 0 {
 			out = append(out, cur.String())
 			cur.Reset()
+			curRunes = 0
+			sepRunes = 0
 		}
-		if len(l) > limit {
-			// Line itself too long; hard-split.
-			for len(l) > limit {
-				out = append(out, l[:limit])
-				l = l[limit:]
+		if lineRunes > limit {
+			// Line itself too long; hard-split on rune boundaries.
+			for lineRunes > limit {
+				i := byteIndexAfterRunes(l, limit)
+				out = append(out, l[:i])
+				l = l[i:]
+				lineRunes = utf8.RuneCountInString(l)
 			}
 		}
-		if cur.Len() > 0 {
+		if curRunes > 0 {
 			cur.WriteString("\n")
+			curRunes++
 		}
 		cur.WriteString(l)
+		curRunes += utf8.RuneCountInString(l)
 	}
-	if cur.Len() > 0 {
+	if curRunes > 0 {
 		out = append(out, cur.String())
 	}
 	return out
+}
+
+func byteIndexAfterRunes(s string, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	count := 0
+	for i := range s {
+		if count == n {
+			return i
+		}
+		count++
+	}
+	return len(s)
 }
 
 // isImageMIME returns true for MIME types the model can probably ingest

@@ -90,6 +90,9 @@ func (r *Runner) handleMessage(msg InboundMessage) {
 		images:    msg.Images,
 	})
 	idle := !r.busy
+	if idle {
+		r.busy = true
+	}
 	r.mu.Unlock()
 
 	if idle {
@@ -126,7 +129,6 @@ func (r *Runner) drainQueue() {
 		}
 		t := r.queue[0]
 		r.queue = r.queue[1:]
-		r.busy = true
 		turnCtx, cancel := context.WithCancel(parent)
 		r.activeCtx = cancel
 		r.mu.Unlock()
@@ -250,5 +252,3 @@ func (r *Runner) sendStatus(channelID string) {
 
 	_ = r.adapter.Send(context.Background(), channelID, status)
 }
-
-

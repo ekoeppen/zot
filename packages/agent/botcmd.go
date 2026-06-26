@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"github.com/patriceckhart/zot/packages/agent/modes/bot"
 	"github.com/patriceckhart/zot/packages/agent/modes/telegram"
 	"github.com/patriceckhart/zot/packages/core"
+	"github.com/patriceckhart/zot/packages/provider"
 )
 
 // detachChild configures cmd to run in its own process group so tty
@@ -357,6 +357,15 @@ func botRun(rawTail []string, version string) error {
 		s, _, serr := openOrCreateSessionForBot(args, resolved, agent, version)
 		if serr == nil {
 			sess = s
+			agent.OnMessageAppended = func(msg provider.Message) {
+				_ = sess.AppendMessage(msg)
+			}
+			agent.OnUsage = func(u provider.Usage) {
+				_ = sess.AppendUsage(u, u)
+			}
+			agent.OnTranscriptCompacted = func(msgs []provider.Message) {
+				_ = sess.AppendCompaction(msgs)
+			}
 			defer sess.Close()
 		} else {
 			fmt.Fprintln(os.Stderr, "session:", serr)
@@ -445,6 +454,3 @@ func maskToken(tok string) string {
 	}
 	return tok[:i+1] + body[:3] + "..." + body[len(body)-3:]
 }
-
-// _ compile-time hint so the strconv import stays if we later add numeric parsing.
-var _ = strconv.Itoa
