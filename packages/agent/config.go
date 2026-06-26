@@ -29,6 +29,13 @@ type Config struct {
 	Temperature *float32 `json:"temperature,omitempty"`
 	Theme       string   `json:"theme"`
 
+	// ToolRender selects how tool calls are drawn in interactive mode.
+	// "box" (default, or empty) wraps each call in a bordered panel;
+	// "flat" drops the frame for a quiet header line plus indented,
+	// frameless output. The ZOT_FLAT_TOOLS env var overrides this when
+	// set ("1"/"true" forces flat, "0"/"false" forces box).
+	ToolRender string `json:"tool_render,omitempty"`
+
 	// QuickModelShortcuts maps slots 1-9 to provider/model pairs used by
 	// Ctrl+1..9. Cmd+1..9 may also work on terminals that forward Super.
 	QuickModelShortcuts []QuickModelShortcut `json:"quick_model_shortcuts,omitempty"`
@@ -96,6 +103,23 @@ func ZotHome() string {
 
 // ConfigPath returns the path to config.json.
 func ConfigPath() string { return filepath.Join(ZotHome(), "config.json") }
+
+// FlatToolRender reports whether tool calls should render flat (no
+// bordered panel). The ZOT_FLAT_TOOLS env var takes precedence over
+// the config when set: "1"/"true"/"yes"/"on" force flat, "0"/"false"/
+// "no"/"off" force box. Otherwise the config's tool_render is
+// consulted; "flat" is flat, anything else (including empty) is box.
+func (c Config) FlatToolRender() bool {
+	if v := strings.TrimSpace(strings.ToLower(os.Getenv("ZOT_FLAT_TOOLS"))); v != "" {
+		switch v {
+		case "1", "true", "yes", "on", "flat":
+			return true
+		case "0", "false", "no", "off", "box":
+			return false
+		}
+	}
+	return strings.EqualFold(strings.TrimSpace(c.ToolRender), "flat")
+}
 
 // AuthPath returns the path to auth.json.
 func AuthPath() string { return filepath.Join(ZotHome(), "auth.json") }

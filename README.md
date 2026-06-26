@@ -555,6 +555,38 @@ When a tool returns an image (for example `read` on a PNG), zot renders it inlin
 
 Frames containing images are full-repainted (no differential diff) to prevent stale image pixels from lingering through scroll. That costs one terminal flash per image-containing frame; set `ZOT_INLINE_IMAGES=off` if that bothers you.
 
+## Tool rendering
+
+By default each tool call (bash, read, write, edit) renders inside a bordered panel — a `┌─ header ─┐`, `│`-prefixed body rows, and a `└─┘` footer. On a screen with many calls the borders can read as busy, so zot also offers a **flat** mode: a single quiet header line per call (`▌ bash …`) with indented, border-free output. Same information — tool name, arg summary, streamed output, the `... (N more lines, ctrl+o to expand)` truncation — just no frame.
+
+Set the `tool_render` key in `$ZOT_HOME/config.json`:
+
+```json
+{
+  "tool_render": "flat"
+}
+```
+
+| Value | Effect |
+|---|---|
+| unset / `"box"` (default) | Each tool call is wrapped in a bordered panel. |
+| `"flat"` | Boxless: a quiet header line plus indented output. |
+
+The `ZOT_FLAT_TOOLS` env var overrides the config for a single run, which is handy for trying it without editing the file:
+
+| Value | Effect |
+|---|---|
+| `1`, `true`, `yes`, `on`, `flat` | Force flat rendering. |
+| `0`, `false`, `no`, `off`, `box` | Force the bordered panel. |
+| unset | Fall back to the `tool_render` config key. |
+
+```sh
+ZOT_FLAT_TOOLS=1 zot   # flat, just this run
+ZOT_FLAT_TOOLS=0 zot   # boxes, even if config.json says "flat"
+```
+
+Either way, theme colors still drive the rendering (the header uses your accent/foreground, output uses the tool-output color) and `ctrl+o` still expands a truncated result.
+
 ## Queued messages
 
 You can keep typing while the agent is working. Pressing `enter` during a turn queues the message instead of interrupting: it shows up above the status bar as `sliding in: <text>` and is delivered as the next user turn the moment the current one finishes. Queue as many as you want; they run in order. `esc` cancels the active turn and drops the queue so a runaway turn doesn't flood you with stale follow-ups; `ctrl+c` while busy arms the exit hint instead of interrupting, a second `ctrl+c` within two seconds exits zot.
