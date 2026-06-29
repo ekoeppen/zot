@@ -338,7 +338,7 @@ func PrintHelp(version string) {
 	fmt.Fprintln(os.Stderr)
 	var headline string
 	if useColor {
-		headline = th.AccentBar(th.Assistant) + assistant(tui.Bold("i'm zot. yet another coding agent harness."))
+		headline = th.AccentBar(th.Assistant) + assistant(tui.Bold("zot. yet another coding agent harness."))
 	} else {
 		headline = "zot. yet another coding agent harness."
 	}
