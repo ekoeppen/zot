@@ -384,6 +384,7 @@ func botRun(rawTail []string, version string) error {
 	runner = bot.NewRunner(adapter, agent, bot.Config{
 		ZotHome:    ZotHome(),
 		Provider:   resolved.Provider,
+		Model:      resolved.Model,
 		AuthMethod: resolved.AuthMethod,
 		CWD:        args.CWD,
 		RefreshCreds: func() error {
@@ -397,7 +398,7 @@ func botRun(rawTail []string, version string) error {
 			}
 			agent.Client = next.NewClient()
 			agent.Model = next.Model
-			runner.UpdateRuntimeConfig(next.Provider, next.AuthMethod, next.CWD)
+			runner.UpdateRuntimeConfig(next.Provider, next.Model, next.AuthMethod, next.CWD)
 			return nil
 		},
 	})

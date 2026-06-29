@@ -191,15 +191,23 @@ func (a *Adapter) handleUpdate(ctx context.Context, u Update,
 
 // Send delivers a reply to a Telegram chat.  channelID is parsed back
 // to int64.  Messages are chunked to 4000 runes (Telegram limit 4096).
-func (a *Adapter) Send(ctx context.Context, channelID, text string) error {
+func (a *Adapter) Send(ctx context.Context, channelID, text string, opts bot.SendOptions) error {
 	chatID, err := strconv.ParseInt(channelID, 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid channelID %q: %w", channelID, err)
 	}
+	replyTo := 0
+	if opts.ReplyToMessageID != "" {
+		if n, err := strconv.Atoi(opts.ReplyToMessageID); err == nil {
+			replyTo = n
+		}
+	}
 	for _, chunk := range chunkMessage(text, 4000) {
-		if err := a.Client.SendMessage(ctx, chatID, chunk, 0); err != nil {
+		if err := a.Client.SendMessage(ctx, chatID, chunk, replyTo); err != nil {
 			return err
 		}
+		// Only the first chunk should be threaded under the original message.
+		replyTo = 0
 	}
 	return nil
 }

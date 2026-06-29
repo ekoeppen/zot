@@ -15,7 +15,9 @@ type testAdapter struct{}
 func (testAdapter) Run(context.Context, func(InboundMessage), func(Command, InboundMessage)) error {
 	return nil
 }
-func (testAdapter) Send(context.Context, string, string) error     { return nil }
+func (testAdapter) Send(context.Context, string, string, SendOptions) error {
+	return nil
+}
 func (testAdapter) IndicateWorking(context.Context, string) func() { return func() {} }
 func (testAdapter) StatusText() string                             { return "" }
 

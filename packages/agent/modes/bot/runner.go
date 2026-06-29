@@ -19,6 +19,7 @@ var stderr = func() io.Writer { return os.Stderr }
 type Config struct {
 	ZotHome      string
 	Provider     string
+	Model        string
 	AuthMethod   string
 	CWD          string
 	RefreshCreds func() error
@@ -57,12 +58,13 @@ func NewRunner(adapter BotAdapter, agent *core.Agent, cfg Config) *Runner {
 	}
 }
 
-// UpdateRuntimeConfig updates provider/auth/cwd at runtime (e.g. after
+// UpdateRuntimeConfig updates provider/model/auth/cwd at runtime (e.g. after
 // credential refresh).  This is thread-safe.
-func (r *Runner) UpdateRuntimeConfig(provider, authMethod, cwd string) {
+func (r *Runner) UpdateRuntimeConfig(provider, model, authMethod, cwd string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.cfg.Provider = provider
+	r.cfg.Model = model
 	r.cfg.AuthMethod = authMethod
 	r.cfg.CWD = cwd
 }
@@ -105,9 +107,10 @@ func (r *Runner) handleCommand(cmd Command, msg InboundMessage) {
 	switch cmd {
 	case CmdStart, CmdHelp:
 		_ = r.adapter.Send(context.Background(), msg.ChannelID,
-			"send me any message and i'll forward it to zot. attach an image and i'll pass it to the model. commands: /status, /stop, or plain stop.")
+			"send me any message and i'll forward it to zot. attach an image and i'll pass it to the model. commands: /status, /stop, or plain stop.",
+			SendOptions{ReplyToMessageID: msg.MessageID})
 	case CmdStatus:
-		r.sendStatus(msg.ChannelID)
+		r.sendStatus(msg.ChannelID, msg.MessageID)
 	case CmdStop:
 		r.cancelActiveTurn(msg.ChannelID, msg.MessageID)
 	}
@@ -199,7 +202,7 @@ func (r *Runner) runTurn(ctx context.Context, t queuedTurn) {
 	}
 
 	// Adapter.Send is responsible for chunking to protocol limits.
-	if err := r.adapter.Send(context.Background(), t.channelID, reply); err != nil {
+	if err := r.adapter.Send(context.Background(), t.channelID, reply, SendOptions{}); err != nil {
 		fmt.Fprintln(stderr(), "bot: send reply:", err)
 	}
 }
@@ -209,26 +212,27 @@ func (r *Runner) cancelActiveTurn(channelID, messageID string) {
 	r.mu.Lock()
 	cancel := r.activeCtx
 	r.mu.Unlock()
+	opts := SendOptions{ReplyToMessageID: messageID}
 	if cancel != nil {
 		cancel()
-		_ = r.adapter.Send(context.Background(), channelID, "cancelled the current turn.")
+		_ = r.adapter.Send(context.Background(), channelID, "cancelled the current turn.", opts)
 	} else {
-		_ = r.adapter.Send(context.Background(), channelID, "nothing running.")
+		_ = r.adapter.Send(context.Background(), channelID, "nothing running.", opts)
 	}
 }
 
 // sendStatus describes agent state to the user.
-func (r *Runner) sendStatus(channelID string) {
+func (r *Runner) sendStatus(channelID, messageID string) {
 	r.mu.Lock()
 	busy := r.busy
 	queued := len(r.queue)
 	ctxUsed := r.lastCtxInput
 	providerName := r.cfg.Provider
+	model := r.cfg.Model
 	authMethod := r.cfg.AuthMethod
 	cwd := r.cfg.CWD
 	r.mu.Unlock()
 
-	model := r.agent.Model
 	ctxMax := 0
 	if m, err := provider.FindModel(providerName, model); err == nil {
 		ctxMax = m.ContextWindow
@@ -250,5 +254,5 @@ func (r *Runner) sendStatus(channelID string) {
 		status += "\n" + extra
 	}
 
-	_ = r.adapter.Send(context.Background(), channelID, status)
+	_ = r.adapter.Send(context.Background(), channelID, status, SendOptions{ReplyToMessageID: messageID})
 }

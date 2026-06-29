@@ -28,6 +28,12 @@ const (
 	CmdStop                  // cancel the active turn
 )
 
+// SendOptions carries protocol-agnostic delivery hints for outbound messages.
+type SendOptions struct {
+	// ReplyToMessageID is an optional adapter-owned message identifier to anchor replies.
+	ReplyToMessageID string
+}
+
 // BotAdapter is the transport layer a concrete protocol must implement.
 // The Runner calls these methods; it never touches protocol types directly.
 type BotAdapter interface {
@@ -39,7 +45,7 @@ type BotAdapter interface {
 	) error
 
 	// Send delivers a reply.  The adapter chunks to protocol limits.
-	Send(ctx context.Context, channelID, text string) error
+	Send(ctx context.Context, channelID, text string, opts SendOptions) error
 
 	// IndicateWorking fires a "typing…" signal; returns a stop func.
 	// Return a no-op if the protocol doesn't support it.
