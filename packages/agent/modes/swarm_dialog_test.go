@@ -753,7 +753,7 @@ func TestRenderSwarmTranscriptBlocks_GroupsByRole(t *testing.T) {
 		"stderr: warning thing",
 		"error: boom",
 	}
-	out := renderSwarmTranscriptBlocks(lines, tui.Theme{}, 80)
+	out := renderSwarmTranscriptBlocks(lines, tui.Theme{}, 80, false)
 	joined := strings.Join(out, "\n")
 
 	// The user echo should appear as a bubble row, which contains
@@ -790,7 +790,7 @@ func TestRenderSwarmTranscriptBlocks_MarkdownStyling(t *testing.T) {
 		"- **bold** item",
 		"- plain item",
 	}
-	out := renderSwarmTranscriptBlocks(lines, tui.Theme{}, 80)
+	out := renderSwarmTranscriptBlocks(lines, tui.Theme{}, 80, false)
 	joined := strings.Join(out, "\n")
 
 	// ANSI bold on/off. Markdown rendering uses CSI 1 / 22.
@@ -821,7 +821,7 @@ func TestRenderSwarmTranscriptBlocks_GroupsAdjacentAssistantLines(t *testing.T) 
 		"```",
 		"Done.",
 	}
-	out := renderSwarmTranscriptBlocks(lines, tui.Theme{}, 80)
+	out := renderSwarmTranscriptBlocks(lines, tui.Theme{}, 80, false)
 	joined := strings.Join(out, "\n")
 
 	// The literal fence markers should be consumed by the markdown

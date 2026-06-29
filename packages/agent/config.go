@@ -69,6 +69,12 @@ type Config struct {
 	// which is on; false shows ignored entries. Toggle from /settings.
 	RespectGitignore *bool `json:"respect_gitignore,omitempty"`
 
+	// CompactMode renders the interactive transcript with less chrome:
+	// tool calls use flat headers instead of bordered panels, and sent
+	// user messages render without padded background bubbles. Off by
+	// default; nil/missing means disabled. Toggle from /settings.
+	CompactMode *bool `json:"compact_mode,omitempty"`
+
 	// Insecure skips TLS verification for custom inference endpoints.
 	Insecure bool `json:"insecure,omitempty"`
 

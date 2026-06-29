@@ -65,6 +65,15 @@ func (configSettingsStore) SetRespectGitignore(enabled bool) error {
 	return SaveConfig(cfg)
 }
 
+func (configSettingsStore) SetCompactMode(enabled bool) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	cfg.CompactMode = &enabled
+	return SaveConfig(cfg)
+}
+
 func (configSettingsStore) SetReasoning(level string) error {
 	cfg, err := LoadConfig()
 	if err != nil {

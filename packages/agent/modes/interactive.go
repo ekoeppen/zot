@@ -71,6 +71,10 @@ type InteractiveConfig struct {
 	// compact_input config / ZOT_COMPACT_INPUT env at startup.
 	CompactUser bool
 
+	// CompactMode mirrors the persisted compact_mode flag at startup.
+	// When true, it enables both flat tool calls and compact user turns.
+	CompactMode *bool
+
 	// QuickModelShortcuts maps slots 1-9 to provider/model pairs. The
 	// shortcuts are Ctrl+1..9. Cmd+1..9 may also work when the terminal
 	// forwards Command/Super keypresses, but Ctrl is the displayed chord.
@@ -265,6 +269,7 @@ type SettingsStore interface {
 	SetAutoSwarm(enabled bool) error
 	SetRecursiveFileSuggest(enabled bool) error
 	SetRespectGitignore(enabled bool) error
+	SetCompactMode(enabled bool) error
 	SetReasoning(level string) error
 	SetTheme(name string) error
 }
@@ -487,6 +492,7 @@ func NewInteractive(cfg InteractiveConfig) *Interactive {
 			ImageProto:  effectiveImageProtocol(cfg.InlineImagesEnabled),
 			FlatTools:   cfg.FlatTools,
 			CompactUser: cfg.CompactUser,
+			CompactMode: cfg.CompactMode != nil && *cfg.CompactMode,
 		},
 		// Prompt is the standard half-block accent bar used by chat
 		// speaker labels too, so the input gutter matches the rest
@@ -2818,6 +2824,7 @@ func (i *Interactive) openSettingsDialog() {
 
 	recursiveFiles := i.cfg.RecursiveFileSuggest != nil && *i.cfg.RecursiveFileSuggest
 	respectGitignore := i.cfg.RespectGitignore == nil || *i.cfg.RespectGitignore
+	compactMode := i.compactModeEnabled()
 	quickItems := i.quickModelSettingItems()
 
 	reasoningOptions := []settingsOption{
@@ -2896,6 +2903,12 @@ func (i *Interactive) openSettingsDialog() {
 			value: respectGitignore,
 		},
 		{
+			key:   "compact_mode",
+			label: "compact transcript rendering",
+			desc:  "reduce visual chrome by rendering tool calls without boxes and sent messages without padded bubbles",
+			value: compactMode,
+		},
+		{
 			key:     "reasoning",
 			label:   "thinking level",
 			desc:    "reasoning depth for thinking-capable models",
@@ -2964,6 +2977,10 @@ func (i *Interactive) quickModelSettingItem(slot int) settingsItem {
 		picker: true,
 		hint:   hint,
 	}
+}
+
+func (i *Interactive) compactModeEnabled() bool {
+	return i.cfg.CompactMode != nil && *i.cfg.CompactMode
 }
 
 func quickModelShortcutSlot(k tui.Key) int {
@@ -3182,6 +3199,23 @@ func (i *Interactive) applySettingToggle(key string, value bool) {
 		i.fileSuggest.SetRespectGitignore(value)
 		i.mu.Lock()
 		i.statusOK = "hide gitignored files in @-picker " + onOff(value)
+		i.statusErr = ""
+		i.mu.Unlock()
+	case "compact_mode":
+		val := value
+		i.cfg.CompactMode = &val
+		if i.cfg.SettingsStore != nil {
+			if err := i.cfg.SettingsStore.SetCompactMode(value); err != nil {
+				i.mu.Lock()
+				i.statusErr = "settings: " + err.Error()
+				i.mu.Unlock()
+				return
+			}
+		}
+		i.mu.Lock()
+		i.view.CompactMode = value
+		i.view.InvalidateRenderCache()
+		i.statusOK = "compact transcript rendering " + onOff(value)
 		i.statusErr = ""
 		i.mu.Unlock()
 	}
@@ -4052,7 +4086,7 @@ func (i *Interactive) openBtwDialog(args []string) {
 		return
 	}
 	seed := strings.TrimSpace(strings.Join(args, " "))
-	i.btwDialog.Open(i.cfg.Theme, i.agent, i.agent.System, i.cfg.Model, i.cfg.CWD, seed, i.invalidate)
+	i.btwDialog.Open(i.cfg.Theme, i.agent, i.agent.System, i.cfg.Model, i.cfg.CWD, seed, i.compactModeEnabled(), i.invalidate)
 	i.invalidate()
 }
 

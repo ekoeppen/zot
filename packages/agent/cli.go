@@ -965,6 +965,7 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 		QuickModelShortcuts:        quickModelShortcuts,
 		RecursiveFileSuggest:       initialCfg.RecursiveFileSuggest,
 		RespectGitignore:           initialCfg.RespectGitignore,
+		CompactMode:                initialCfg.CompactMode,
 		ThemeName:                  initialCfg.Theme,
 		FlatTools:                  initialCfg.FlatToolRender(),
 		CompactUser:                initialCfg.CompactUserInput(),

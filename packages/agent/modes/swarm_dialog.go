@@ -32,10 +32,11 @@ import (
 //	↑/↓/PgUp/PgDn/Home/End  scroll
 //	esc / q    return to the list
 type swarmDialog struct {
-	active   bool
-	snapshot func() []swarm.AgentSnapshot
-	stop     func(id string) error
-	remove   func(id string) error
+	active      bool
+	compactMode bool
+	snapshot    func() []swarm.AgentSnapshot
+	stop        func(id string) error
+	remove      func(id string) error
 	// spawn accepts an optional model + provider override (empty
 	// strings mean "let the child resolve its own default"). The cli
 	// adapter forwards these to swarm.Swarm.SpawnReq.
@@ -119,6 +120,10 @@ func newSwarmDialog() *swarmDialog { return &swarmDialog{} }
 // run on whatever the user last picked via /model. Pass empty
 // strings to clear the override (the child then resolves its own
 // default the same way a bare `zot` invocation does).
+func (d *swarmDialog) SetCompactMode(enabled bool) {
+	d.compactMode = enabled
+}
+
 func (d *swarmDialog) SetCurrentModel(model, providerID string) {
 	d.pendingModel = model
 	d.pendingProvider = providerID
@@ -274,7 +279,7 @@ func (d *swarmDialog) transcriptEditorCursorRow(width, popupRows, editorRowOffse
 		// Full body, no scroll window — the host's outer scrollback
 		// owns overflow now. Cursor row math just counts every
 		// rendered line.
-		body := renderSwarmTranscriptBlocks(raw, tui.Theme{}, width)
+		body := renderSwarmTranscriptBlocks(raw, tui.Theme{}, width, d.compactMode)
 		row += len(body)
 	}
 
@@ -1107,7 +1112,7 @@ func (d *swarmDialog) renderTranscript(th tui.Theme, width int) []string {
 	// That gives the user the chat UX they expect (transcript grows
 	// with the window, arrow keys belong to the editor, no "↑ N
 	// more above" cliff).
-	body := renderSwarmTranscriptBlocks(raw, th, width)
+	body := renderSwarmTranscriptBlocks(raw, th, width, d.compactMode)
 
 	out := header
 	out = append(out, body...)
@@ -1218,7 +1223,7 @@ func agentIsBusy(a *swarm.AgentSnapshot) bool {
 // whole block together — essential for markdown, which needs the
 // full message body in one piece to detect fenced code spans,
 // bullet lists, and so on.
-func renderSwarmTranscriptBlocks(lines []string, th tui.Theme, width int) []string {
+func renderSwarmTranscriptBlocks(lines []string, th tui.Theme, width int, compactMode bool) []string {
 	type blockKind int
 	const (
 		kindAssistant blockKind = iota
@@ -1289,7 +1294,7 @@ func renderSwarmTranscriptBlocks(lines []string, th tui.Theme, width int) []stri
 		switch b.kind {
 		case kindUser:
 			text := strings.Join(b.body, "\n")
-			out = append(out, btwUserBubbleRows(th, text, bubbleWidth)...)
+			out = append(out, btwUserBubbleRows(th, text, bubbleWidth, compactMode)...)
 		case kindAssistant:
 			text := strings.Join(b.body, "\n")
 			md := tui.RenderMarkdown(strings.TrimLeft(text, "\n"), th, innerMD)

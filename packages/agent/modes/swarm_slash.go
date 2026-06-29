@@ -69,6 +69,7 @@ func (i *Interactive) runSwarm(ctx context.Context, args []string) {
 	// wants a different model for the next swarm agent, they pick it
 	// via /model first (globally), or, while inside the spawn
 	// editor, by typing /model on its own line to pop the picker.
+	i.swarmDialog.SetCompactMode(i.compactModeEnabled())
 	i.swarmDialog.SetCurrentModel(i.cfg.Model, i.cfg.Provider)
 	if i.cfg.LoggedInProviders != nil {
 		i.swarmDialog.SetLoggedInProviders(i.cfg.LoggedInProviders())
