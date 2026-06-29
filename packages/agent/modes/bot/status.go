@@ -17,7 +17,7 @@ type StatusSnapshot struct {
 	Usage        provider.Usage
 	Subscription bool
 	ContextUsed  int
-	ContextMax  int
+	ContextMax   int
 	Busy         bool
 	Queued       int
 }
