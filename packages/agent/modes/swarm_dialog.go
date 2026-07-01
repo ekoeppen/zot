@@ -34,6 +34,7 @@ import (
 type swarmDialog struct {
 	active      bool
 	compactMode bool
+	lineInput   bool
 	snapshot    func() []swarm.AgentSnapshot
 	stop        func(id string) error
 	remove      func(id string) error
@@ -124,6 +125,17 @@ func (d *swarmDialog) SetCompactMode(enabled bool) {
 	d.compactMode = enabled
 }
 
+func (d *swarmDialog) SetLineInput(enabled bool) {
+	d.lineInput = enabled
+}
+
+func (d *swarmDialog) editorPrompt(th tui.Theme) string {
+	if d.lineInput {
+		return ""
+	}
+	return th.AccentBar(th.Accent)
+}
+
 func (d *swarmDialog) SetCurrentModel(model, providerID string) {
 	d.pendingModel = model
 	d.pendingProvider = providerID
@@ -200,6 +212,7 @@ func (d *swarmDialog) CursorPos(width int) (row, col int) {
 		if d.fileSuggest != nil && d.fileSuggest.Active(d.newTaskEd.Value()) {
 			popupRows = len(d.fileSuggest.Render(d.newTaskEd.Value(), tui.Theme{}, width))
 		}
+		d.newTaskEd.Prompt = d.editorPrompt(tui.Theme{})
 		_, eRow, eCol := d.newTaskEd.Render(width - 2)
 		const headerRows = 1
 		const editorBlankRow = 1
@@ -228,6 +241,7 @@ func (d *swarmDialog) CursorPos(width int) (row, col int) {
 		if d.promptSuggest != nil && d.promptSuggest.Active(d.promptEd.Value()) {
 			popupRows = len(d.promptSuggest.Render(d.promptEd.Value(), tui.Theme{}, width))
 		}
+		d.promptEd.Prompt = d.editorPrompt(tui.Theme{})
 		_, eRow, eCol := d.promptEd.Render(width - 2)
 
 		if d.viewing {
@@ -629,7 +643,7 @@ func (d *swarmDialog) handleViewingKey(k tui.Key) (closed bool, msg, errMsg stri
 // file/dir chips, cursor movement, and the same accent-bar prompt style.
 func (d *swarmDialog) openSpawnEditor(th tui.Theme) {
 	d.spawning = true
-	d.newTaskEd = tui.NewEditor(th.AccentBar(th.Accent))
+	d.newTaskEd = tui.NewEditor(d.editorPrompt(th))
 	d.fileSuggest = newFileSuggester()
 	d.fileSuggest.SetCWD(d.cwd)
 	if d.spawnDraft != "" {
@@ -717,7 +731,7 @@ func stripSlashModelLine(buf string) string {
 // editing experience (paste, @-picker, drop chips) is identical.
 func (d *swarmDialog) openPromptEditor(th tui.Theme, targetID string) {
 	d.prompting = true
-	d.promptEd = tui.NewEditor(th.AccentBar(th.Accent))
+	d.promptEd = tui.NewEditor(d.editorPrompt(th))
 	d.promptSuggest = newFileSuggester()
 	d.promptSuggest.SetCWD(d.cwd)
 	d.promptTargetID = targetID
@@ -1003,7 +1017,7 @@ func (d *swarmDialog) Render(th tui.Theme, width int) []string {
 			d.openSpawnEditor(th)
 		}
 		if d.newTaskEd != nil {
-			d.newTaskEd.Prompt = th.AccentBar(th.Accent)
+			d.newTaskEd.Prompt = d.editorPrompt(th)
 		}
 		// One-line banner reminding the user which model the
 		// agent-to-be will run against. Skipped when no model was
@@ -1149,7 +1163,7 @@ func (d *swarmDialog) appendTranscriptEditor(out []string, th tui.Theme, width i
 		d.openPromptEditor(th, a.ID)
 	}
 	if d.promptEd != nil {
-		d.promptEd.Prompt = th.AccentBar(th.Accent)
+		d.promptEd.Prompt = d.editorPrompt(th)
 	}
 	if d.promptSuggest != nil {
 		d.promptSuggest.SetCWD(d.cwd)
@@ -1328,7 +1342,7 @@ func (d *swarmDialog) renderPromptEditor(th tui.Theme, width int, out []string) 
 		d.openPromptEditor(th, d.promptTargetID)
 	}
 	if d.promptEd != nil {
-		d.promptEd.Prompt = th.AccentBar(th.Accent)
+		d.promptEd.Prompt = d.editorPrompt(th)
 	}
 	target := d.promptTargetID
 	if target == "" {

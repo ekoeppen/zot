@@ -75,6 +75,20 @@ type Config struct {
 	// default; nil/missing means disabled. Toggle from /settings.
 	CompactMode *bool `json:"compact_mode,omitempty"`
 
+	// TUIInputStyle controls the main input rendering. Supported values:
+	// "plain" (default) and "lines".
+	TUIInputStyle string `json:"tui_input_style,omitempty"`
+
+	// TUIStatusPosition controls whether model, usage, and cwd information
+	// render above or below the main input. Supported values: "above_input"
+	// (default) and "below_input".
+	TUIStatusPosition string `json:"tui_status_position,omitempty"`
+
+	// TUIWorkingPosition controls whether the busy/working spinner renders
+	// above or below the main input. Supported values: "above_input"
+	// (default) and "below_input".
+	TUIWorkingPosition string `json:"tui_working_position,omitempty"`
+
 	// Insecure skips TLS verification for custom inference endpoints.
 	Insecure bool `json:"insecure,omitempty"`
 

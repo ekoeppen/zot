@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/patriceckhart/zot/packages/agent/swarm"
+	"github.com/patriceckhart/zot/packages/tui"
 )
 
 // runSwarm dispatches /swarm subcommands. Layout:
@@ -70,6 +71,7 @@ func (i *Interactive) runSwarm(ctx context.Context, args []string) {
 	// via /model first (globally), or, while inside the spawn
 	// editor, by typing /model on its own line to pop the picker.
 	i.swarmDialog.SetCompactMode(i.compactModeEnabled())
+	i.swarmDialog.SetLineInput(tui.NormalizeInputStyle(i.cfg.TUIInputStyle) == tui.InputStyleLines)
 	i.swarmDialog.SetCurrentModel(i.cfg.Model, i.cfg.Provider)
 	if i.cfg.LoggedInProviders != nil {
 		i.swarmDialog.SetLoggedInProviders(i.cfg.LoggedInProviders())
