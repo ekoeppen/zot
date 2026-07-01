@@ -1,6 +1,9 @@
 package agent
 
-import "github.com/patriceckhart/zot/packages/provider"
+import (
+	"github.com/patriceckhart/zot/packages/provider"
+	"github.com/patriceckhart/zot/packages/tui"
+)
 
 type configSettingsStore struct{}
 
@@ -71,6 +74,48 @@ func (configSettingsStore) SetCompactMode(enabled bool) error {
 		return err
 	}
 	cfg.CompactMode = &enabled
+	return SaveConfig(cfg)
+}
+
+func (configSettingsStore) SetTUIInputStyle(style string) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	style = tui.NormalizeInputStyle(style)
+	if style == tui.InputStylePlain {
+		cfg.TUIInputStyle = ""
+	} else {
+		cfg.TUIInputStyle = style
+	}
+	return SaveConfig(cfg)
+}
+
+func (configSettingsStore) SetTUIStatusPosition(position string) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	position = tui.NormalizeStatusPosition(position)
+	if position == tui.StatusPositionAboveInput {
+		cfg.TUIStatusPosition = ""
+	} else {
+		cfg.TUIStatusPosition = position
+	}
+	return SaveConfig(cfg)
+}
+
+func (configSettingsStore) SetTUIWorkingPosition(position string) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return err
+	}
+	position = tui.NormalizeWorkingPosition(position)
+	if position == tui.WorkingPositionAboveInput {
+		cfg.TUIWorkingPosition = ""
+	} else {
+		cfg.TUIWorkingPosition = position
+	}
 	return SaveConfig(cfg)
 }
 
