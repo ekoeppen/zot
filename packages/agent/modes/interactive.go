@@ -2127,14 +2127,17 @@ func (i *Interactive) handleKey(ctx context.Context, k tui.Key) (done bool) {
 				i.invalidate()
 				return false
 			}
-			i.mu.Unlock()
 		}
 		// In multi-line / wrapped input, Up first moves inside the editor.
-		// At the editor's top edge it falls back to chat scrolling, preserving
-		// the old single-line scroll behavior.
+		// At the editor's top edge, plain Up can browse input history when
+		// history browsing is safe/active; otherwise it falls back to chat
+		// scrolling, preserving the old single-line scroll behavior.
 		if !i.suggest.Active(i.ed.Value()) && !i.fileSuggest.Active(i.ed.Value()) {
 			if i.ed.MoveVertical(-1) {
 				i.invalidate()
+				return false
+			}
+			if !k.Alt && i.handleInputHistoryKey(k) {
 				return false
 			}
 			i.scrollBy(+3)
@@ -2144,6 +2147,9 @@ func (i *Interactive) handleKey(ctx context.Context, k tui.Key) (done bool) {
 		if !i.suggest.Active(i.ed.Value()) && !i.fileSuggest.Active(i.ed.Value()) {
 			if i.ed.MoveVertical(+1) {
 				i.invalidate()
+				return false
+			}
+			if !k.Alt && i.handleInputHistoryKey(k) {
 				return false
 			}
 			if i.scrollOffset > 0 {
@@ -2268,10 +2274,7 @@ func (i *Interactive) handleKey(ctx context.Context, k tui.Key) (done bool) {
 		}
 	}
 
-	if i.handleInputHistoryKey(k) {
-		return false
-	}
-	if i.inputHistoryIndex >= 0 && k.Kind != tui.KeyLeft && k.Kind != tui.KeyRight {
+	if i.inputHistoryIndex >= 0 && k.Kind != tui.KeyUp && k.Kind != tui.KeyDown {
 		i.inputHistoryIndex = -1
 	}
 
@@ -2407,11 +2410,11 @@ func (i *Interactive) pasteClipboard() {
 }
 
 func (i *Interactive) handleInputHistoryKey(k tui.Key) bool {
-	if k.Kind != tui.KeyLeft && k.Kind != tui.KeyRight {
+	if k.Kind != tui.KeyUp && k.Kind != tui.KeyDown {
 		return false
 	}
-	// Do not steal normal cursor movement. History browsing can only
-	// start from an empty editor; once active, Left/Right keep walking
+	// Do not steal normal vertical cursor movement. History browsing can only
+	// start from an empty editor; once active, Up/Down keep walking
 	// the ring so repeated presses work even though the editor now
 	// contains the selected historical prompt.
 	if i.inputHistoryIndex < 0 && !i.ed.IsEmpty() {
@@ -2423,17 +2426,22 @@ func (i *Interactive) handleInputHistoryKey(k tui.Key) bool {
 	}
 
 	if i.inputHistoryIndex < 0 {
-		// Start just after the newest item so Left lands on the most
-		// recent user prompt and Right keeps the editor empty.
+		// Start just after the newest item so Up lands on the most
+		// recent user prompt. A lone Down from an empty editor is not
+		// history navigation; let the caller fall through to normal UI
+		// behavior instead.
+		if k.Kind != tui.KeyUp {
+			return false
+		}
 		i.inputHistoryIndex = len(hist)
 	}
 
 	switch k.Kind {
-	case tui.KeyLeft:
+	case tui.KeyUp:
 		if i.inputHistoryIndex > 0 {
 			i.inputHistoryIndex--
 		}
-	case tui.KeyRight:
+	case tui.KeyDown:
 		if i.inputHistoryIndex < len(hist) {
 			i.inputHistoryIndex++
 		}
