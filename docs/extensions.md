@@ -468,12 +468,19 @@ Reply with `shutdown_ack` and then exit.
 
 ```
 zot ext list                    list installed extensions and their state
+zot ext doctor                  diagnose load, registration, and conflict issues
 zot ext install <path|git-url>  copy / clone into $ZOT_HOME/extensions/
 zot ext remove <name>           delete an extension directory
 zot ext enable <name>           re-enable a disabled extension
 zot ext disable <name>          disable without removing
 zot ext logs <name> [-f]        cat / tail the extension's stderr
 ```
+
+`zot ext doctor` runs the same discovery path as zot startup, but reports
+what happened instead of changing the fail-soft runtime behavior. It shows
+manifest errors, disabled or shadowed extensions, subprocess load errors,
+ready/auto-ready status, registered commands/tools, registration conflicts,
+warnings, and each extension's stderr log path.
 
 `zot ext install <path>` does a recursive copy; `<git-url>` does a
 shallow clone. Both validate that the destination contains an

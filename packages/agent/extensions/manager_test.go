@@ -182,6 +182,88 @@ func TestManagerSpawnAndInvoke(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsReportMalformedFramesAndConflicts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mock extension uses /bin/sh; skip on windows")
+	}
+
+	tmp := t.TempDir()
+	extRoot := filepath.Join(tmp, "extensions")
+	writeDiagExtension := func(name, script string) {
+		t.Helper()
+		dir := filepath.Join(extRoot, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "run.sh"), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		mfb, _ := json.Marshal(map[string]any{"name": name, "exec": "./run.sh"})
+		if err := os.WriteFile(filepath.Join(dir, "extension.json"), mfb, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeDiagExtension("a-first", `#!/bin/sh
+printf '%s\n' '{"type":"hello","name":"a-first","version":"0.1","capabilities":["tools"]}'
+printf '%s\n' '{"type":"register_tool","name":"shared","description":"first","schema":{"type":"object"}}'
+printf '%s\n' '{"type":"register_tool","name":"broken","description":"bad","schema":'
+printf '%s\n' '{"type":"ready"}'
+while IFS= read -r line; do
+  case "$line" in
+    *'"type":"shutdown"'*) exit 0 ;;
+  esac
+done
+`)
+	writeDiagExtension("b-second", `#!/bin/sh
+printf '%s\n' '{"type":"hello","name":"b-second","version":"0.1","capabilities":["tools"]}'
+printf '%s\n' '{"type":"register_tool","name":"shared","description":"second","schema":{"type":"object"}}'
+printf '%s\n' '{"type":"ready"}'
+while IFS= read -r line; do
+  case "$line" in
+    *'"type":"shutdown"'*) exit 0 ;;
+  esac
+done
+`)
+
+	mgr := New(tmp, "", "0.0.0-test", "anthropic", "claude-opus-4-7", &stubHooks{})
+	if errs := mgr.Discover(context.Background()); len(errs) > 0 {
+		t.Fatalf("discover errors: %v", errs)
+	}
+	defer mgr.Stop(2 * time.Second)
+	mgr.WaitForReady(2 * time.Second)
+
+	diags := mgr.Diagnostics()
+	byName := map[string]ExtensionDiagnostic{}
+	for _, d := range diags {
+		byName[d.Name] = d
+	}
+
+	first := byName["a-first"]
+	if len(first.Messages) == 0 || !strings.Contains(strings.Join(first.Messages, "\n"), "malformed json frame") {
+		t.Fatalf("expected malformed-frame diagnostic, got %#v", first.Messages)
+	}
+
+	var shadowedTool bool
+	var conflictMessage bool
+	for _, d := range diags {
+		if strings.Contains(strings.Join(d.Messages, "\n"), "conflicts with another extension") {
+			conflictMessage = true
+		}
+		for _, tool := range d.Tools {
+			if tool.Name == "shared" && !tool.Active {
+				shadowedTool = true
+			}
+		}
+	}
+	if !shadowedTool {
+		t.Fatalf("expected one shared tool registration to be inactive, got %#v", diags)
+	}
+	if !conflictMessage {
+		t.Fatalf("expected conflict diagnostic, got %#v", diags)
+	}
+}
+
 // TestSpontaneousOpenPanel verifies that an extension sending an
 // open_panel frame outside of any command response causes the manager
 // to call hooks.OpenPanel with the correct PanelSpec fields.

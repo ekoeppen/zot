@@ -92,6 +92,10 @@ type Extension struct {
 	// EmitEvent / InterceptToolCall to filter recipients.
 	eventSubs     map[string]struct{}
 	interceptSubs map[string]struct{}
+
+	autoReady     bool
+	readyTimedOut bool
+	diagnostics   []string
 }
 
 // HostHooks is the small interface the manager calls back into the
@@ -255,7 +259,7 @@ func (m *Manager) loadOne(ctx context.Context, dir string) error {
 	if mf.Name == "" {
 		return errors.New("manifest: name is required")
 	}
-	hasTheme := hasExtensionTheme(dir)
+	hasTheme := HasExtensionTheme(dir)
 	if mf.Exec == "" && !hasTheme {
 		return errors.New("manifest: exec is required")
 	}
@@ -307,7 +311,9 @@ func (m *Manager) loadOne(ctx context.Context, dir string) error {
 // Loaded BEFORE Discover so explicit paths win on name conflicts
 // against installed extensions. Spawns happen in parallel like the
 // regular discovery path; errors are returned per path.
-func hasExtensionTheme(dir string) bool {
+// HasExtensionTheme reports whether an extension directory contains a theme
+// file in one of the supported extension-owned locations.
+func HasExtensionTheme(dir string) bool {
 	for _, file := range []string{"theme.json", filepath.Join("themes", "theme.json")} {
 		if _, err := os.Stat(filepath.Join(dir, file)); err == nil {
 			return true
@@ -490,6 +496,10 @@ func (m *Manager) WaitForReady(grace time.Duration) {
 			select {
 			case <-ext.readyCh:
 			case <-deadline:
+				ext.mu.Lock()
+				ext.readyTimedOut = true
+				ext.diagnostics = append(ext.diagnostics, "timed out waiting for ready frame")
+				ext.mu.Unlock()
 				fmt.Fprintf(ext.logFile, "[zot] timed out waiting for ready frame; proceeding\n")
 				ext.readyOnce.Do(func() { close(ext.readyCh) })
 			}
@@ -623,6 +633,10 @@ func (m *Manager) assumeReadyAfterIdle(ext *Extension) {
 		if current.Equal(last) {
 			// No new frame in the idle window. Treat as ready.
 			ext.readyOnce.Do(func() {
+				ext.mu.Lock()
+				ext.autoReady = true
+				ext.diagnostics = append(ext.diagnostics, "no ready frame; auto-ready after idle")
+				ext.mu.Unlock()
 				fmt.Fprintf(ext.logFile, "[zot] no ready frame; auto-readying after idle (legacy SDK?)\n")
 				close(ext.readyCh)
 			})
@@ -662,6 +676,7 @@ func (m *Manager) readLoop(ext *Extension, scanner *bufio.Scanner) {
 		ext.mu.Unlock()
 		var frame extproto.Frame
 		if err := json.Unmarshal(line, &frame); err != nil {
+			ext.recordDiagnostic(fmt.Sprintf("malformed json frame: %v", err))
 			fmt.Fprintf(ext.logFile, "[zot] malformed json from extension: %v\n", err)
 			continue
 		}
@@ -675,10 +690,14 @@ func (m *Manager) readLoop(ext *Extension, scanner *bufio.Scanner) {
 				// keep the race detector happy.
 				m.mu.Lock()
 				ext.commands = append(ext.commands, rc)
-				if _, exists := m.commandIndex[rc.Name]; !exists {
+				_, shadowed := m.commandIndex[rc.Name]
+				if !shadowed {
 					m.commandIndex[rc.Name] = ext
 				}
 				m.mu.Unlock()
+				if shadowed {
+					ext.recordDiagnostic(fmt.Sprintf("command /%s conflicts with another extension registering the same name", rc.Name))
+				}
 			}
 		case "register_tool":
 			var rt extproto.RegisterToolFromExt
@@ -691,16 +710,21 @@ func (m *Manager) readLoop(ext *Extension, scanner *bufio.Scanner) {
 			if len(rt.Schema) > 0 {
 				var tmp any
 				if err := json.Unmarshal(rt.Schema, &tmp); err != nil {
+					ext.recordDiagnostic(fmt.Sprintf("tool %q schema is not valid json: %v", rt.Name, err))
 					fmt.Fprintf(ext.logFile, "[zot] tool %q: schema is not valid json (%v); skipped\n", rt.Name, err)
 					continue
 				}
 			}
 			m.mu.Lock()
 			ext.tools = append(ext.tools, rt)
-			if _, exists := m.toolIndex[rt.Name]; !exists {
+			_, shadowed := m.toolIndex[rt.Name]
+			if !shadowed {
 				m.toolIndex[rt.Name] = ext
 			}
 			m.mu.Unlock()
+			if shadowed {
+				ext.recordDiagnostic(fmt.Sprintf("tool %s conflicts with another extension registering the same name", rt.Name))
+			}
 		case "ready":
 			ext.readyOnce.Do(func() { close(ext.readyCh) })
 		case "subscribe":
@@ -805,9 +829,100 @@ func (m *Manager) readLoop(ext *Extension, scanner *bufio.Scanner) {
 		case "shutdown_ack":
 			// Caller of Stop is waiting on the process exit, not this frame.
 		default:
+			ext.recordDiagnostic(fmt.Sprintf("unknown frame type %q", frame.Type))
 			fmt.Fprintf(ext.logFile, "[zot] unknown frame type %q\n", frame.Type)
 		}
 	}
+}
+
+func (ext *Extension) recordDiagnostic(msg string) {
+	ext.mu.Lock()
+	defer ext.mu.Unlock()
+	ext.diagnostics = append(ext.diagnostics, msg)
+}
+
+// RegisteredCommandDiagnostic describes one command an extension attempted
+// to register and whether it owns the active dispatch slot.
+type RegisteredCommandDiagnostic struct {
+	Name        string
+	Description string
+	Active      bool
+}
+
+// RegisteredToolDiagnostic describes one tool an extension attempted to
+// register and whether it owns the active dispatch slot.
+type RegisteredToolDiagnostic struct {
+	Name        string
+	Description string
+	Active      bool
+}
+
+// ExtensionDiagnostic is a stable snapshot for diagnostic commands.
+type ExtensionDiagnostic struct {
+	Name          string
+	Version       string
+	Dir           string
+	LogPath       string
+	ThemeOnly     bool
+	Ready         bool
+	AutoReady     bool
+	ReadyTimedOut bool
+	Commands      []RegisteredCommandDiagnostic
+	Tools         []RegisteredToolDiagnostic
+	Messages      []string
+}
+
+// Diagnostics returns a snapshot of loaded extension state for commands such
+// as `zot ext doctor`. It is read-only and does not change manager behavior.
+func (m *Manager) Diagnostics() []ExtensionDiagnostic {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	names := make([]string, 0, len(m.ext))
+	for name := range m.ext {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]ExtensionDiagnostic, 0, len(names))
+	for _, name := range names {
+		ext := m.ext[name]
+		ext.mu.Lock()
+		msgs := append([]string(nil), ext.diagnostics...)
+		autoReady := ext.autoReady
+		readyTimedOut := ext.readyTimedOut
+		ext.mu.Unlock()
+
+		diag := ExtensionDiagnostic{
+			Name:          ext.Manifest.Name,
+			Version:       ext.Manifest.Version,
+			Dir:           ext.Dir,
+			LogPath:       ext.LogPath,
+			ThemeOnly:     ext.Manifest.Exec == "",
+			AutoReady:     autoReady,
+			ReadyTimedOut: readyTimedOut,
+			Messages:      msgs,
+		}
+		select {
+		case <-ext.readyCh:
+			diag.Ready = true
+		default:
+		}
+		for _, c := range ext.commands {
+			diag.Commands = append(diag.Commands, RegisteredCommandDiagnostic{
+				Name:        c.Name,
+				Description: c.Description,
+				Active:      m.commandIndex[c.Name] == ext,
+			})
+		}
+		for _, t := range ext.tools {
+			diag.Tools = append(diag.Tools, RegisteredToolDiagnostic{
+				Name:        t.Name,
+				Description: t.Description,
+				Active:      m.toolIndex[t.Name] == ext,
+			})
+		}
+		out = append(out, diag)
+	}
+	return out
 }
 
 // Commands returns a snapshot of every (extension, command) pair

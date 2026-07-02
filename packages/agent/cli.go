@@ -183,7 +183,7 @@ func Run(rawArgs []string, version string) error {
 	if handled, err := runBotCommand(rawArgs, version); handled {
 		return err
 	}
-	if handled, err := runExtCommand(rawArgs); handled {
+	if handled, err := runExtCommand(rawArgs, version); handled {
 		return err
 	}
 	if handled, err := runUpdateCommand(rawArgs, version); handled {

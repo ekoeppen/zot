@@ -1,9 +1,13 @@
 package agent
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/patriceckhart/zot/packages/agent/extensions"
 )
 
 // TestExtInstallDotSource verifies that `zot ext install .` derives the
@@ -122,5 +126,58 @@ func TestGitignoreNegation(t *testing.T) {
 	}
 	if g.Match("build/keep.txt", false) {
 		t.Fatal("expected build/keep.txt to be re-included by negation")
+	}
+}
+
+func TestExtDoctorStaticScanAndRender(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ZOT_HOME", home)
+	cwd := t.TempDir()
+	oldCWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldCWD)
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+
+	mustWrite := func(path, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mustWrite(filepath.Join(cwd, ".zot", "extensions", "disabled", "extension.json"), `{"name":"disabled","exec":"./run.sh","enabled":false}`)
+	mustWrite(filepath.Join(cwd, ".zot", "extensions", "theme", "extension.json"), `{"name":"theme"}`)
+	mustWrite(filepath.Join(cwd, ".zot", "extensions", "theme", "theme.json"), `{"name":"Theme"}`)
+	mustWrite(filepath.Join(cwd, ".zot", "extensions", "bad", "extension.json"), `{bad json`)
+	mustWrite(filepath.Join(cwd, ".zot", "extensions", "dup", "extension.json"), `{"name":"dup","exec":"./project.sh"}`)
+	mustWrite(filepath.Join(home, "extensions", "dup", "extension.json"), `{"name":"dup","exec":"./global.sh"}`)
+
+	rows := scanExtDoctorStatic()
+	if len(rows) != 5 {
+		t.Fatalf("rows = %d, want 5: %#v", len(rows), rows)
+	}
+
+	var out bytes.Buffer
+	for _, row := range rows {
+		printExtDoctorRow(&out, row, extensions.ExtensionDiagnostic{})
+	}
+	got := out.String()
+	for _, want := range []string{
+		"disabled [project] disabled",
+		"theme [project] theme-only",
+		"bad [project] error",
+		"dup [global] shadowed",
+		"parse manifest:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, got)
+		}
 	}
 }

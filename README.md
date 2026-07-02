@@ -676,11 +676,18 @@ zot can be extended in any language via a subprocess + JSON-RPC protocol. Extens
 ```bash
 zot ext install <path|git-url>   # copy / clone into $ZOT_HOME/extensions/
 zot ext list                      # show installed extensions
+zot ext doctor                    # diagnose load, registration, and conflict issues
 zot ext logs <name> [-f]          # cat or tail the extension's stderr log
 zot ext enable <name>             # re-enable a disabled extension
 zot ext disable <name>            # disable without removing
 zot ext remove <name>             # delete an extension directory
 ```
+
+`zot ext doctor` keeps normal extension startup fail-soft, but gives
+you an explicit troubleshooting view: manifest errors, disabled or
+shadowed extensions, subprocess load errors, ready/auto-ready status,
+registered commands/tools, registration conflicts, warnings, and the
+stderr log path.
 
 For development, point `zot --ext <path>` at a working directory and skip the install step entirely. Repeatable; takes precedence over installed extensions of the same name.
 
