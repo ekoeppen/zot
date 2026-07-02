@@ -23,7 +23,7 @@ var helpKeyRows = [][2]string{
 	{"ctrl+l", "redraw the screen"},
 	{"ctrl+o", "expand / collapse long tool results"},
 	{"pgup / pgdn", "scroll the chat one page up / down"},
-	{"up / down", "move within multi-line input - scroll chat at input edge"},
+	{"up / down", "move in input, browse prompt history at top edge, scroll chat when empty"},
 }
 
 // renderHelpBlock builds the friendly /help view. Uses the shared
