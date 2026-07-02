@@ -302,6 +302,7 @@ Opens a dialog with every persistent setting. `up`/`down` to navigate, `enter` o
 - **render images when supported** — draw screenshots / `read`-returned images inline using the terminal's image protocol, or fall back to a text placeholder. Auto-detected from `TERM_PROGRAM`; the toggle overrides the detection. The row is greyed out and forced off on terminals that don't speak any image protocol.
 - **auto-swarm** — let the main agent spawn background sub-agents in parallel via a built-in `swarm_spawn` tool. Off by default. When on, the tool is registered with the running agent, the system prompt gains a short addendum telling the model to delegate independent sub-tasks proactively, and zot watches every sub-agent the main agent spawns. As soon as the last sub-agent in a batch finishes its initial task, an `[auto-swarm update]` message is injected back into the chat with each agent's status / task / transcript tail, so the main agent can summarise the collective outcome. Flipping off mid-session removes the tool from the live agent and strips the addendum on the next turn — the model stops trying to delegate. See `/swarm` for the dashboard that lets you monitor, message, kill, or remove the spawned agents.
 - **compact transcript rendering**: reduce visual chrome in the chat transcript. Tool calls render as a quiet header plus indented output instead of a bordered box, and sent messages render without padded background bubbles. Off by default. Changes apply immediately and persist to `config.json` as `compact_mode`.
+- **TUI settings**: opens a sub-view for input layout and status placement. **Input style** can be `plain` (default prompt line) or `lines` (separator lines above and below the input). **Status position** places model, usage, and working-directory information above or below the input. **Working spinner position** places the busy spinner above or below the input. Changes apply immediately and persist to `config.json` as `tui_input_style`, `tui_status_position`, and `tui_working_position` (`above_input` or `below_input` for the position fields).
 - **thinking level** — choose reasoning for supported models: off (default; no reasoning), minimum (~1k tokens), low (~2k), medium (~8k), high (~16k), maximum (~32k). The change is persisted to `config.json` and applied to the running agent's next model call.
 - **color theme** — choose the built-in auto/dark/light theme or any JSON theme discovered under `$ZOT_HOME/themes` or a loaded extension. Theme files can override any subset of UI colors, syntax colors, and spinner frames/messages. Changes apply immediately; if a selected theme file is deleted, zot resets to auto. See [docs/themes.md](docs/themes.md).
 - **model shortcuts** — opens a sub-view with nine slots (`model 1` ... `model 9`). `enter` on a slot opens the same `/model` selector and binds the chosen provider/model to that slot; `backspace` clears a slot. Once assigned, press `Ctrl+1` ... `Ctrl+9` from the editor to switch the active model instantly (the same cross-provider swap `/model` performs, transcript and cost carried over). Assigning a shortcut does not change the current model. Shortcuts are skipped while a turn is running.
@@ -657,14 +658,14 @@ Type `@` followed by a filter string to narrow the list (e.g. `@read` shows only
 | `alt+left`, `alt+right` | Jump one word back or forward. |
 | `ctrl+u`, `ctrl+k` | Delete to start or end of line. |
 | `ctrl+w`, `alt+backspace` | Delete the previous word. |
-| `up`, `down` (editor non-empty) | Cycle through prompt history. |
+| `up`, `down` | Move within multi-line input. At the top edge, `up` recalls previous prompts and `down` moves forward through prompt history. |
 
 ### Chat scroll
 
 | Key | Action |
 |---|---|
 | `pgup`, `pgdn` | Scroll one page up or down. |
-| `up`, `down` (editor empty) | Scroll three lines up or down. This is how the mouse wheel reaches the scroll logic on most terminals. |
+| `up`, `down` (editor empty, not browsing prompt history) | Scroll three lines up or down. This is how the mouse wheel reaches the scroll logic on most terminals. |
 
 ## Extensions
 
