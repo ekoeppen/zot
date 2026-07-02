@@ -7,7 +7,7 @@ This extension reads MCP server configurations from standard locations (same for
 ## Features
 
 - **Standard config format** — same JSON as Claude Desktop, Cursor, Cline
-- **Smart lazy loading** — servers spawn on startup to discover tools, then auto-sleep after idle time
+- **Smart lazy loading** — cached tools register at startup, servers wake for refresh or tool calls, then auto-sleep after idle time
 - **Auto-respawn** — calling a tool on a sleeping server wakes it up automatically
 - **Multi-transport** — stdio, streamable-http, and SSE transports
 - **Multi-server** — connect to any number of MCP servers simultaneously
@@ -53,7 +53,7 @@ This extension reads MCP server configurations from standard locations (same for
    zot ext install .
    ```
 
-4. **Restart zot** — your MCP tools are ready!
+4. **Restart zot.** On first run the extension refreshes its tool cache in the background. When zot shows `MCP tool cache changed`, run `/reload-ext` once. Future launches register the cached MCP tools immediately.
 
 ## Configuration
 
@@ -168,12 +168,13 @@ Standard MCP config — same as Claude Desktop, with zot-specific extensions:
 └──────────────────────────────────────────────────────────────┘
 ```
 
-1. **Startup**: mcp-bridge reads config, spawns all MCP servers
-2. **Discovery**: calls `tools/list` on each server, registers tools with zot
-3. **Naming**: tools appear as `mcp__<server>__<tool>` (e.g., `mcp__filesystem__read_file`)
-4. **Idle timeout**: servers not used for 5 minutes are automatically stopped
-5. **Auto-respawn**: calling a tool on a stopped server wakes it up
-6. **Routing**: tool calls are forwarded to the appropriate MCP server
+1. **Startup**: mcp-bridge reads config and registers tools from `mcp-tools-cache.json`
+2. **Background refresh**: starts configured MCP servers, calls `tools/list`, and updates the cache when definitions change
+3. **Reload**: if the cache changed, run `/reload-ext` once so zot rebuilds the tool registry with the new definitions
+4. **Naming**: tools appear as `mcp__<server>__<tool>` (e.g., `mcp__filesystem__read_file`)
+5. **Idle timeout**: servers not used for 5 minutes are automatically stopped
+6. **Auto-respawn**: calling a tool on a stopped server wakes it up
+7. **Routing**: tool calls are forwarded to the appropriate MCP server
 
 ## Slash Commands
 
@@ -210,16 +211,17 @@ Server and tool names are sanitized (non-alphanumeric characters become `_`).
 
 The bridge uses a "smart lazy" strategy:
 
-1. **On startup**: all servers spawn, tools are discovered and registered
-2. **During use**: servers stay running for fast tool calls
-3. **After 5 min idle**: unused servers are automatically stopped (saves memory/CPU)
-4. **On next tool call**: the server is respawned automatically (~1-3s delay)
+1. **On startup**: cached tool definitions are registered without blocking zot startup
+2. **In the background**: servers start long enough to refresh the tool cache
+3. **During use**: servers stay running for fast tool calls
+4. **After 5 min idle**: unused servers are automatically stopped (saves memory/CPU)
+5. **On next tool call**: the server is respawned automatically (~1-3s delay)
 
 This gives you:
-- ✅ All tools visible to the LLM immediately
-- ✅ Fast tool calls when actively working
-- ✅ Memory freed when not using MCP tools
-- ✅ No manual server management needed
+- Cached tools visible to the LLM immediately
+- Fast tool calls when actively working
+- Memory freed when not using MCP tools
+- One manual `/reload-ext` only when tool definitions change
 
 ## Troubleshooting
 

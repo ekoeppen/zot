@@ -50,50 +50,65 @@ func main() {
 	// Logger writes to stderr (captured by zot into ext logs)
 	logger := log.New(os.Stderr, "[mcp-bridge] ", log.LstdFlags)
 
-	// Load config
-	cwd, err := os.Getwd()
-	if err != nil {
-		logger.Fatalf("getwd: %v", err)
+	var b *bridge
+	e.OnHello(func(host ext.HostInfo) {
+		cwd := host.CWD
+		if cwd == "" {
+			var err error
+			cwd, err = os.Getwd()
+			if err != nil {
+				logger.Printf("getwd fallback: %v", err)
+			}
+		}
+
+		cfg, err := loadConfig(cwd)
+		if err != nil {
+			logger.Printf("config error: %v", err)
+			notifyText(e, "error", "mcp: config error: "+err.Error())
+		}
+
+		if len(cfg.MCPServers) == 0 {
+			logger.Printf("no MCP servers configured")
+			// Still register commands so user can check status and run setup.
+			registerCommands(e, nil)
+			return
+		}
+
+		logger.Printf("found %d MCP server(s)", len(cfg.MCPServers))
+
+		b = newBridge(e, logger)
+		b.loadServers(cfg)
+
+		cachePath := toolCachePath()
+		cache, err := readToolCache(cachePath)
+		if err != nil {
+			logger.Printf("tool cache error: %v", err)
+		}
+		cachedToolCount := b.registerCachedTools(cache)
+		logger.Printf("registered %d cached MCP tool(s)", cachedToolCount)
+
+		b.startIdleReaper()
+		registerCommands(e, b)
+		startBackgroundToolRefresh(e, b, logger, cachePath, cachedToolCount)
+	})
+
+	// Run the extension protocol loop
+	if err := e.Run(); err != nil {
+		logger.Printf("fatal: %v", err)
 	}
-	cfg, err := loadConfig(cwd)
-	if err != nil {
-		logger.Printf("config error: %v", err)
-		e.Notify("error", "mcp: config error: "+err.Error())
+
+	// Cleanup
+	if b != nil {
+		b.stopAll()
 	}
+}
 
-	if len(cfg.MCPServers) == 0 {
-		logger.Printf("no MCP servers configured")
-		// Still register commands so user can check status
-		registerCommands(e, nil)
-		e.Run()
-		return
-	}
-
-	logger.Printf("found %d MCP server(s)", len(cfg.MCPServers))
-
-	// Create bridge
-	b := newBridge(e, logger)
-	b.loadServers(cfg)
-
-	cachePath := toolCachePath()
-	cache, err := readToolCache(cachePath)
-	if err != nil {
-		logger.Printf("tool cache error: %v", err)
-	}
-	cachedToolCount := b.registerCachedTools(cache)
-	logger.Printf("registered %d cached MCP tool(s)", cachedToolCount)
-
-	// Start idle reaper
-	b.startIdleReaper()
-
-	// Register slash commands
-	registerCommands(e, b)
-
+func startBackgroundToolRefresh(e *ext.Extension, b *bridge, logger *log.Logger, cachePath string, cachedToolCount int) {
 	// Refresh discovery in the background so zot startup is not blocked. Only ask
 	// for /reload-ext if the discovered tool cache actually changed; otherwise a
 	// reload would just repeat this cycle without adding anything.
 	go func() {
-		time.Sleep(500 * time.Millisecond) // Wait for hello handshake
+		time.Sleep(500 * time.Millisecond) // Let ready/registrations flush first.
 		if cachedToolCount == 0 {
 			notifyText(e, "warn", "MCP loaded without cached tools. Refreshing tool cache in background.")
 		} else {
@@ -114,14 +129,6 @@ func main() {
 		}
 		notifyBridgeStatus(e, b)
 	}()
-
-	// Run the extension protocol loop
-	if err := e.Run(); err != nil {
-		logger.Printf("fatal: %v", err)
-	}
-
-	// Cleanup
-	b.stopAll()
 }
 
 // registerCommands sets up the /mcp slash commands.

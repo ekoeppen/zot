@@ -25,20 +25,22 @@ no SDK required:
 ```python
 #!/usr/bin/env python3
 # $ZOT_HOME/extensions/hello-py/hello.py
-import json, sys, threading
+import json, sys
 
 def emit(obj):
     sys.stdout.write(json.dumps(obj) + "\n")
     sys.stdout.flush()
 
 emit({"type":"hello","name":"hello-py","version":"1.0.0","capabilities":["commands"]})
-emit({"type":"register_command","name":"hellopy","description":"say hi (python)"})
 
 for line in sys.stdin:
     msg = json.loads(line)
-    if msg["type"] == "command_invoked":
+    if msg["type"] == "hello_ack":
+        emit({"type":"register_command","name":"hellopy","description":"say hi (python)"})
+        emit({"type":"ready"})
+    elif msg["type"] == "command_invoked":
         emit({"type":"command_response","id":msg["id"],"action":"prompt",
-              "prompt": "Greet me very briefly. Add one emoji."})
+              "prompt": "Greet me very briefly in one sentence."})
     elif msg["type"] == "shutdown":
         emit({"type":"shutdown_ack"})
         break
@@ -135,19 +137,21 @@ manifest tells zot how to launch it:
 2. **Spawn**: enabled extensions are launched as subprocesses. stderr
    redirects to `$ZOT_HOME/logs/ext-<name>.log` (one file per
    extension, append-mode).
-3. **Hello handshake**: the extension sends a `hello` frame; zot
-   replies with `hello_ack` containing the protocol version, the
-   active provider/model/cwd, and the extension's own data directory
-   so it can persist files beside its manifest.
-4. **Registration**: the extension sends `register_command` frames.
-   First-come-first-served: a name already taken by a built-in or by
-   a previously-loaded extension is silently shadowed (logged in the
-   extension's own log file).
-5. **Runtime**: zot dispatches `command_invoked` frames when the
-   user runs a registered command; the extension responds with
-   `command_response`. Extensions can also push `notify` frames at
-   any time. Panel-capable extensions may open an interactive panel,
-   receive key events, and push redraws while the panel is focused.
+3. **Hello handshake**: the extension's first stdout frame must be
+   `hello`; zot replies with `hello_ack` containing the protocol
+   version, the active provider/model/cwd, and the extension's own
+   data directory so it can persist files beside its manifest.
+4. **Registration**: after receiving `hello_ack`, the extension sends
+   `register_command`, `register_tool`, and subscription frames, then
+   sends `ready`. First-come-first-served: a name already taken by a
+   built-in or by a previously-loaded extension is silently shadowed
+   (logged in the extension's own log file).
+5. **Runtime**: after `ready`, zot dispatches `command_invoked` frames
+   when the user runs a registered command; the extension responds
+   with `command_response`. Extensions can also push `notify` frames
+   during runtime. Panel-capable extensions may open an interactive
+   panel, receive key events, and push redraws while the panel is
+   focused.
 6. **Shutdown**: when zot exits, it sends `shutdown` and waits up to
    2s for the extension to send `shutdown_ack`. Holdouts are
    SIGTERM'd, then SIGKILL'd.
@@ -160,7 +164,9 @@ restarted.
 
 All frames are one JSON object per line. Top-level `type` is the
 discriminator. Optional `id` correlates request frames with their
-responses.
+responses. The canonical startup order is `hello`, `hello_ack`,
+registration frames, then `ready`. Do not send `notify`, logs, or any
+other stdout frame before `hello`.
 
 ### Extension → host
 
@@ -370,9 +376,13 @@ Sent in response to `shutdown`. Extension should exit promptly after.
  "data_dir":"/Users/pat/Developer/zot/.zot/extensions/todos"}
 ```
 
-Sent immediately after `hello`. The extension can use these fields to
-decide which commands to register (e.g. only register a Python tool
-on macOS, only register a model-specific shortcut for opus, etc.).
+Sent immediately after `hello`. Wait for this frame before sending
+registrations if they depend on host metadata. The extension can use
+these fields to decide which commands to register (e.g. only register
+a Python tool on macOS, only register a model-specific shortcut for
+opus, etc.). `cwd` is the user's project directory; the extension
+process itself runs from the extension directory, so do not use
+`os.Getwd()` or `process.cwd()` when you need the project path.
 `extension_dir` / `data_dir` are where the extension should persist
 its own state (for example `todos.json`, cached metadata, or auth
 tokens scoped to that extension).
@@ -526,12 +536,26 @@ func main() {
             return ext.TextResult(in.City + ": sunny")
         })
 
+    // Optional: register project-specific commands after hello_ack.
+    e.OnHello(func(host ext.HostInfo) {
+        if host.CWD != "" {
+            e.Command("cwd", "show the current project directory", func(args string) ext.Response {
+                return ext.Display(host.CWD)
+            })
+        }
+    })
+
     e.Run()
 }
 ```
 
 Build with `go build -o hello .`, drop the binary + an `extension.json`
 into `$ZOT_HOME/extensions/hello/`.
+
+`OnHello` is optional. Use it when configuration or registrations need
+host metadata such as `HostInfo.CWD`, `Provider`, `Model`, `ZotVersion`,
+`ExtensionDir`, or `DataDir`. The SDK sends `hello`, waits for
+`hello_ack`, runs `OnHello`, announces registrations, then sends `ready`.
 
 The SDK has four interceptor hooks, all optional:
 
