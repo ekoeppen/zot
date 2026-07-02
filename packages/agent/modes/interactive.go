@@ -429,9 +429,8 @@ type Interactive struct {
 	parkedTotal int
 
 	// inputHistoryIndex is -1 when not browsing history. When the
-	// editor is empty, Left/Right can walk previous user prompts for
-	// quick manual testing without stealing normal cursor movement in
-	// non-empty input.
+	// editor is empty, Up/Down can walk previous user prompts without
+	// stealing normal vertical cursor movement in non-empty input.
 	inputHistoryIndex int
 
 	// lastCtrlC is when the user last pressed ctrl+c. The first press

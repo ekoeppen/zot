@@ -657,14 +657,14 @@ Type `@` followed by a filter string to narrow the list (e.g. `@read` shows only
 | `alt+left`, `alt+right` | Jump one word back or forward. |
 | `ctrl+u`, `ctrl+k` | Delete to start or end of line. |
 | `ctrl+w`, `alt+backspace` | Delete the previous word. |
-| `up`, `down` (editor non-empty) | Cycle through prompt history. |
+| `up`, `down` | Move within multi-line input. At the top edge, `up` recalls previous prompts and `down` moves forward through prompt history. |
 
 ### Chat scroll
 
 | Key | Action |
 |---|---|
 | `pgup`, `pgdn` | Scroll one page up or down. |
-| `up`, `down` (editor empty) | Scroll three lines up or down. This is how the mouse wheel reaches the scroll logic on most terminals. |
+| `up`, `down` (editor empty, not browsing prompt history) | Scroll three lines up or down. This is how the mouse wheel reaches the scroll logic on most terminals. |
 
 ## Extensions
 
