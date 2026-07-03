@@ -1251,7 +1251,8 @@ func (i *Interactive) redraw() {
 		Telegram:       i.telegramBridge != nil && i.telegramBridge.Active(),
 		Cols:           cols,
 	})
-	if tui.NormalizeInputStyle(i.cfg.TUIInputStyle) == tui.InputStyleLines {
+	inputStyle := tui.NormalizeInputStyle(i.cfg.TUIInputStyle)
+	if inputStyle == tui.InputStyleLines || inputStyle == tui.InputStyleBlock {
 		i.ed.Prompt = ""
 	} else {
 		i.ed.Prompt = i.cfg.Theme.AccentBar(i.cfg.Theme.Accent)
@@ -1262,9 +1263,15 @@ func (i *Interactive) redraw() {
 		workingLines = []string{"  " + busyPrefix}
 	}
 	inputCursorOffset := 0
-	if tui.NormalizeInputStyle(i.cfg.TUIInputStyle) == tui.InputStyleLines {
+	inputCursorColOffset := 0
+	switch inputStyle {
+	case tui.InputStyleLines:
 		edLines = tui.InputLines(i.cfg.Theme, edLines, cols)
 		inputCursorOffset = 1
+	case tui.InputStyleBlock:
+		edLines = tui.InputBlock(i.cfg.Theme, edLines, cols)
+		inputCursorOffset = 1
+		inputCursorColOffset = 2
 	}
 
 	// "Sliding in" chips for messages the user typed while a turn is
@@ -1313,7 +1320,7 @@ func (i *Interactive) redraw() {
 	if !i.swarmDialog.Active() {
 		bottom = append(bottom, suggest...)
 		bottom = append(bottom, queue...)
-		lineInput := tui.NormalizeInputStyle(i.cfg.TUIInputStyle) == tui.InputStyleLines
+		lineInput := inputStyle == tui.InputStyleLines
 		statusBelow := statusPosition == tui.StatusPositionBelowInput
 		workingBelow := workingPosition == tui.WorkingPositionBelowInput
 
@@ -1506,7 +1513,7 @@ func (i *Interactive) redraw() {
 		dialogLead = 1
 	}
 	cursorRow := inputStartRow + inputCursorOffset + curR
-	cursorCol := curC
+	cursorCol := curC + inputCursorColOffset
 	if i.btwDialog.Active() {
 		if r, c := i.btwDialog.CursorPos(cols); r >= 0 {
 			cursorRow = dialogLead + r
@@ -2957,6 +2964,7 @@ func (i *Interactive) openSettingsDialog() {
 	inputStyleOptions := []settingsOption{
 		{value: tui.InputStylePlain, label: "plain", desc: "render the input as the normal prompt line"},
 		{value: tui.InputStyleLines, label: "lines", desc: "draw separator lines above and below the input"},
+		{value: tui.InputStyleBlock, label: "block", desc: "render the input as a user-bubble-style block"},
 	}
 	inputStyleChoice := 0
 	for idx, opt := range inputStyleOptions {
@@ -3032,7 +3040,7 @@ func (i *Interactive) openSettingsDialog() {
 				{
 					key:     "tui_input_style",
 					label:   "input style",
-					desc:    "choose between the plain prompt and a lined input area",
+					desc:    "choose between the plain prompt, lines, and a block input area",
 					options: inputStyleOptions,
 					choice:  inputStyleChoice,
 				},

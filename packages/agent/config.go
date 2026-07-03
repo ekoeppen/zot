@@ -76,7 +76,7 @@ type Config struct {
 	CompactMode *bool `json:"compact_mode,omitempty"`
 
 	// TUIInputStyle controls the main input rendering. Supported values:
-	// "plain" (default) and "lines".
+	// "plain" (default), "lines", and "block".
 	TUIInputStyle string `json:"tui_input_style,omitempty"`
 
 	// TUIStatusPosition controls whether model, usage, and cwd information
