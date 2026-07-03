@@ -5,6 +5,7 @@ import "strings"
 const (
 	InputStylePlain = "plain"
 	InputStyleLines = "lines"
+	InputStyleBlock = "block"
 
 	StatusPositionAboveInput = "above_input"
 	StatusPositionBelowInput = "below_input"
@@ -15,8 +16,10 @@ const (
 
 func NormalizeInputStyle(v string) string {
 	switch strings.ToLower(strings.TrimSpace(v)) {
-	case InputStyleLines, "line", "boxed", "box":
+	case InputStyleLines, "line":
 		return InputStyleLines
+	case InputStyleBlock, "bubble", "boxed", "box":
+		return InputStyleBlock
 	default:
 		return InputStylePlain
 	}
@@ -49,6 +52,33 @@ func InputLines(th Theme, lines []string, width int) []string {
 	out = append(out, rule)
 	out = append(out, lines...)
 	out = append(out, rule)
+	return out
+}
+
+func InputBlock(th Theme, lines []string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	bubbleW := width - 2
+	if bubbleW < 1 {
+		bubbleW = 1
+	}
+	row := func(content string) string {
+		visible := visibleWidth(content)
+		if visible < bubbleW {
+			content += strings.Repeat(" ", bubbleW-visible)
+		}
+		bg := sgrBGColor(th.UserBubbleBG)
+		bar := bg + th.FG256(th.Accent, "▌ ")
+		body := bg + strings.ReplaceAll(content, reset, reset+bg) + reset
+		return bar + body
+	}
+	out := make([]string, 0, len(lines)+2)
+	out = append(out, row(""))
+	for _, line := range lines {
+		out = append(out, row(line))
+	}
+	out = append(out, row(""))
 	return out
 }
 
