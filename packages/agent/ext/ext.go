@@ -22,6 +22,11 @@
 // Build it, drop the binary + an extension.json next to it under
 // `$ZOT_HOME/extensions/hello/`, and zot picks it up on next launch.
 //
+// Use OnHello when registration or configuration depends on host metadata
+// such as HostInfo.CWD, Provider, Model, ZotVersion, ExtensionDir, or DataDir.
+// Run sends hello, waits for hello_ack, runs OnHello, announces registrations,
+// then sends ready.
+//
 // The same wire format also has reference clients in TypeScript and
 // Python under examples/extensions/. Use whichever language fits.
 package ext
@@ -257,6 +262,7 @@ type Extension struct {
 	interceptAssistant AssistantMessageHandler
 	panelKeys          map[string]func(key, text string)
 	panelCloses        map[string]func()
+	onHello            func(HostInfo)
 
 	// Caps reported in the hello frame.
 	caps []string
@@ -308,6 +314,17 @@ func New(name, version string) *Extension {
 // Host returns the HostInfo received during the hello handshake.
 // Returns the zero value if Run hasn't started yet.
 func (e *Extension) Host() HostInfo { return e.host }
+
+// OnHello registers a callback that runs after zot acknowledges the
+// hello frame and before commands/tools are announced. Use it when
+// registrations depend on host metadata such as CWD or ZotHome-derived
+// paths. The callback may call Command, Tool, On, and interceptor
+// registration methods.
+func (e *Extension) OnHello(fn func(HostInfo)) {
+	e.mu.Lock()
+	e.onHello = fn
+	e.mu.Unlock()
+}
 
 // Logf writes a line to the extension's stderr, which zot captures to
 // $ZOT_HOME/logs/ext-<name>.log. Use this for debug output: anything
@@ -451,9 +468,12 @@ func (e *Extension) Notify(level, message string) {
 // Run starts the protocol loop. Blocks until stdin closes (zot has
 // shut us down). Returns the first fatal error, or nil on clean exit.
 func (e *Extension) Run() error {
-	// Send hello, then re-announce all commands (covers Command calls
-	// made before Run, and is also fine for those made after via
-	// Command()'s direct send).
+	scanner := bufio.NewScanner(e.in)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+
+	// Send hello first. zot answers with hello_ack immediately; read it
+	// synchronously so extensions can use HostInfo while registering
+	// commands/tools before the ready frame.
 	if err := e.send(extproto.HelloFromExt{
 		Type:         "hello",
 		Name:         e.name,
@@ -462,6 +482,35 @@ func (e *Extension) Run() error {
 	}); err != nil {
 		return err
 	}
+	if !scanner.Scan() {
+		return scanner.Err()
+	}
+	var ack extproto.HelloAckFromHost
+	if err := json.Unmarshal(scanner.Bytes(), &ack); err != nil {
+		return fmt.Errorf("parse hello_ack: %w", err)
+	}
+	if ack.Type != "hello_ack" {
+		return fmt.Errorf("first host frame must be hello_ack (got %q)", ack.Type)
+	}
+	e.host = HostInfo{
+		ProtocolVersion: ack.ProtocolVersion,
+		ZotVersion:      ack.ZotVersion,
+		Provider:        ack.Provider,
+		Model:           ack.Model,
+		CWD:             ack.CWD,
+		ExtensionDir:    ack.ExtensionDir,
+		DataDir:         ack.DataDir,
+	}
+	e.mu.Lock()
+	onHello := e.onHello
+	e.mu.Unlock()
+	if onHello != nil {
+		onHello(e.host)
+	}
+
+	// Re-announce all commands (covers Command calls made before Run and
+	// from OnHello, and is also fine for those made after via Command()'s
+	// direct send).
 	e.mu.Lock()
 	descs := append([]descTuple(nil), e.descriptions...)
 	toolDefs := append([]toolDef(nil), e.toolDefs...)
@@ -508,8 +557,6 @@ func (e *Extension) Run() error {
 	// land in time for the typical use case.
 	_ = e.send(extproto.ReadyFromExt{Type: "ready"})
 
-	scanner := bufio.NewScanner(e.in)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		var frame extproto.Frame
@@ -519,18 +566,7 @@ func (e *Extension) Run() error {
 		}
 		switch frame.Type {
 		case "hello_ack":
-			var ack extproto.HelloAckFromHost
-			if err := json.Unmarshal(line, &ack); err == nil {
-				e.host = HostInfo{
-					ProtocolVersion: ack.ProtocolVersion,
-					ZotVersion:      ack.ZotVersion,
-					Provider:        ack.Provider,
-					Model:           ack.Model,
-					CWD:             ack.CWD,
-					ExtensionDir:    ack.ExtensionDir,
-					DataDir:         ack.DataDir,
-				}
-			}
+			// Already handled before registrations; ignore duplicates.
 		case "command_invoked":
 			var ci extproto.CommandInvokedFromHost
 			if err := json.Unmarshal(line, &ci); err != nil {

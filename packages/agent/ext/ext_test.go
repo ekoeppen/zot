@@ -137,6 +137,58 @@ func (h *extHarness) handshake(t *testing.T) {
 
 // ---------- tests ----------
 
+// TestOnHelloCanRegisterUsingHostInfo checks that extensions can use
+// host metadata before announcing their initial registrations.
+func TestOnHelloCanRegisterUsingHostInfo(t *testing.T) {
+	h := newHarness("cwd-ext")
+
+	h.ext.OnHello(func(host HostInfo) {
+		h.ext.Command("cwd", "show cwd", func(args string) Response {
+			return Display(host.CWD)
+		})
+	})
+
+	go h.ext.Run()
+
+	f := h.next(t)
+	if f.hdr.Type != "hello" {
+		t.Fatalf("expected hello, got %q", f.hdr.Type)
+	}
+	h.sendToExt(t, extproto.HelloAckFromHost{
+		Type:            "hello_ack",
+		ProtocolVersion: extproto.ProtocolVersion,
+		ZotVersion:      "0.0.0-test",
+		Provider:        "anthropic",
+		Model:           "claude-test",
+		CWD:             "/tmp/project",
+	})
+
+	var sawCommand bool
+	for {
+		f := h.next(t)
+		if f.hdr.Type == "register_command" {
+			var rc extproto.RegisterCommandFromExt
+			if err := json.Unmarshal(f.raw, &rc); err != nil {
+				t.Fatalf("unmarshal register_command: %v", err)
+			}
+			if rc.Name == "cwd" {
+				sawCommand = true
+			}
+		}
+		if f.hdr.Type == "ready" {
+			break
+		}
+	}
+	if !sawCommand {
+		t.Fatal("OnHello-registered command was not announced before ready")
+	}
+	if got := h.ext.Host().CWD; got != "/tmp/project" {
+		t.Fatalf("Host().CWD = %q, want /tmp/project", got)
+	}
+
+	h.hostW.Close()
+}
+
 // TestOpenPanelEmitsCorrectFrame checks that e.OpenPanel sends a
 // well-formed open_panel frame with the correct PanelSpec fields.
 func TestOpenPanelEmitsCorrectFrame(t *testing.T) {

@@ -106,10 +106,11 @@ zot replies with `hello_ack`:
  "provider":"anthropic","model":"claude-opus-4-7","cwd":"/path/to/project"}
 ```
 
-### Registration (immediately after hello)
+### Registration (after hello_ack)
 
-Send registration frames in any order, then a single `ready`
-sentinel so zot can finalize the agent's tool registry:
+The canonical startup order is `hello`, wait for `hello_ack`, send
+registration frames in any order, then send a single `ready` sentinel
+so zot can finalize the agent's tool registry:
 
 ```json
 {"type":"register_command","name":"weather","description":"current weather"}
@@ -121,7 +122,11 @@ sentinel so zot can finalize the agent's tool registry:
 
 If you don't send `ready`, zot's idle watchdog auto-treats you as
 ready after 250ms of no frames, but always send it explicitly when
-you can — newer extensions on faster hosts shave that 250ms off.
+you can. Newer extensions on faster hosts shave that 250ms off.
+
+Use `hello_ack.cwd` for the user's project directory. The extension
+process itself runs from the extension directory, so do not use
+`os.Getwd()` or `process.cwd()` when you need the project path.
 
 ### Runtime frames
 
@@ -171,9 +176,10 @@ never stalls the agent.
 ## Important rules
 
 - **stdout is reserved for the protocol.** Anything you print to
-  stdout that isn't a JSON frame breaks the wire. Use stderr for
-  logs / debug output (zot captures stderr to
-  `$ZOT_HOME/logs/ext-<name>.log`).
+  stdout that isn't a JSON frame breaks the wire. The first stdout
+  frame must be `hello`; do not send `notify`, logs, or registration
+  frames before that handshake starts. Use stderr for logs / debug
+  output (zot captures stderr to `$ZOT_HOME/logs/ext-<name>.log`).
 - **One JSON object per line.** No multi-line JSON. Always end
   every frame with `\n`.
 - **Flush after writing.** Most stdout writes are line-buffered when
@@ -212,6 +218,15 @@ func main() {
             return ext.TextResult(in.City + ": sunny, 21°C (fake)")
         })
 
+    // Optional: register project-specific commands after hello_ack.
+    e.OnHello(func(host ext.HostInfo) {
+        if host.CWD != "" {
+            e.Command("cwd", "show the current project directory", func(args string) ext.Response {
+                return ext.Display(host.CWD)
+            })
+        }
+    })
+
     if err := e.Run(); err != nil {
         e.Logf("fatal: %v", err)
     }
@@ -219,6 +234,11 @@ func main() {
 ```
 
 Build: `go build -o weather .`
+
+`OnHello` is optional. Use it when configuration or registrations need
+host metadata such as `HostInfo.CWD`, `Provider`, `Model`, `ZotVersion`,
+`ExtensionDir`, or `DataDir`. The SDK sends `hello`, waits for
+`hello_ack`, runs `OnHello`, announces registrations, then sends `ready`.
 
 `extension.json`:
 ```json
@@ -243,16 +263,18 @@ function log(s: string) { stderr.write(`[scratchpad] ${s}\n`); }
 
 send({ type: "hello", name: "scratchpad", version: "1.0.0",
        capabilities: ["commands", "tools"] });
-send({ type: "register_command", name: "note", description: "append a note" });
-send({ type: "register_tool", name: "read_notes",
-       description: "Read the user's scratchpad notes.",
-       schema: { type: "object", properties: {} } });
-send({ type: "ready" });
 
 const rl = createInterface({ input: stdin, crlfDelay: Infinity });
 rl.on("line", (line) => {
   const f = JSON.parse(line);
-  if (f.type === "command_invoked" && f.name === "note") {
+  if (f.type === "hello_ack") {
+    // f.cwd is the user's project directory.
+    send({ type: "register_command", name: "note", description: "append a note" });
+    send({ type: "register_tool", name: "read_notes",
+           description: "Read the user's scratchpad notes.",
+           schema: { type: "object", properties: {} } });
+    send({ type: "ready" });
+  } else if (f.type === "command_invoked" && f.name === "note") {
     send({ type: "command_response", id: f.id, action: "display",
            display: `noted: ${f.args}` });
   } else if (f.type === "tool_call" && f.name === "read_notes") {
@@ -282,12 +304,14 @@ import json, sys
 def emit(o): sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 
 emit({"type": "hello", "name": "hello-py", "version": "1.0.0", "capabilities": ["commands"]})
-emit({"type": "register_command", "name": "hellopy", "description": "say hi (python)"})
-emit({"type": "ready"})
 
 for line in sys.stdin:
     msg = json.loads(line)
-    if msg["type"] == "command_invoked":
+    if msg["type"] == "hello_ack":
+        # msg["cwd"] is the user's project directory.
+        emit({"type": "register_command", "name": "hellopy", "description": "say hi (python)"})
+        emit({"type": "ready"})
+    elif msg["type"] == "command_invoked":
         emit({"type": "command_response", "id": msg["id"],
               "action": "prompt", "prompt": "Say hi briefly."})
     elif msg["type"] == "shutdown":
