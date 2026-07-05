@@ -46,6 +46,20 @@ func LoadUserModels() {
 	provider.SetUserModels(models)
 }
 
+// isGatewayProvider returns true for providers that act as routers or
+// gateways serving models from any provider in the catalog (OpenRouter,
+// Vercel AI Gateway, Cloudflare AI Gateway, etc.). For these providers
+// the model id is never repaired — a model that lives under "deepseek"
+// in the catalog is perfectly valid when served through OpenRouter.
+func isGatewayProvider(prov string) bool {
+	switch prov {
+	case "openrouter", "vercel-ai-gateway", "cloudflare-ai-gateway":
+		return true
+	default:
+		return false
+	}
+}
+
 // ValidateAndRepairConfig checks the persisted config.json's
 // (Provider, Model) pair against the active catalog and repairs any
 // mismatch in-place (and on disk) before any UI renders. Three failure
@@ -56,6 +70,10 @@ func LoadUserModels() {
 //   - cfg.Model belongs to a different provider than cfg.Provider
 //     (e.g. provider=anthropic + model=kimi-for-coding from a stale
 //     half-applied switch) -> reset model to the provider's default.
+//
+// Gateway providers (openrouter, vercel-ai-gateway, cloudflare-ai-gateway)
+// are exempt from the cross-provider model check because they can serve
+// any model from the catalog.
 //
 // Silent on success; one stderr line per repair. Errors loading or
 // saving the file are non-fatal — the caller continues with defaults.
@@ -76,7 +94,12 @@ func ValidateAndRepairConfig() {
 
 	if cfg.Provider != "" && cfg.Model != "" {
 		if _, err := provider.FindModel(cfg.Provider, cfg.Model); err != nil {
-			if m, err := provider.FindModel("", cfg.Model); err == nil {
+			// Gateway providers (openrouter, vercel-ai-gateway, etc.) can
+			// serve any model from the catalog. A model id that belongs to
+			// "deepseek" is perfectly valid when served through OpenRouter.
+			if isGatewayProvider(cfg.Provider) {
+				// Provider is a router; skip the cross-provider model repair.
+			} else if m, err := provider.FindModel("", cfg.Model); err == nil {
 				fix := defaultModelForProvider(cfg.Provider)
 				fmt.Fprintf(os.Stderr,
 					"zot: config.json: model %q belongs to provider %q (config has provider=%q); switched model to %q\n",
