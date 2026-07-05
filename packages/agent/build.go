@@ -437,30 +437,7 @@ func Resolve(args Args, requireCred bool) (Resolved, error) {
 			err = nil
 		}
 	}
-	// Gateway/router providers (openrouter, vercel-ai-gateway, etc.) are
-	// open-catalogue too: they can route any model id from any provider.
-	// When the model isn't found under the gateway provider, try the
-	// global catalog and keep the model id as-is.
-	if err != nil && isGatewayProvider(provName) {
-		if m, findErr := provider.FindModel("", model); findErr == nil {
-			resolvedModel = provider.Model{
-				Provider:         provName,
-				ID:               m.ID,
-				DisplayName:      m.DisplayName,
-				ContextWindow:    m.ContextWindow,
-				MaxOutput:        m.MaxOutput,
-				Reasoning:        m.Reasoning,
-				AdaptiveThinking: m.AdaptiveThinking,
-				PriceInput:       m.PriceInput,
-				PriceOutput:      m.PriceOutput,
-				PriceCacheRead:   m.PriceCacheRead,
-				PriceCacheWrite:  m.PriceCacheWrite,
-				BaseURL:          "", // let the gateway client use its default
-				Source:           "catalog",
-			}
-			err = nil
-		}
-	} else if cfg, ok := provider.CustomProviders()[provName]; ok && resolvedModel.BaseURL == "" && cfg.BaseURL != "" {
+	if cfg, ok := provider.CustomProviders()[provName]; ok && err == nil && resolvedModel.BaseURL == "" && cfg.BaseURL != "" {
 		// Fall back to the provider-level base URL when the model does
 		// not define its own endpoint.
 		resolvedModel.BaseURL = cfg.BaseURL
@@ -476,23 +453,22 @@ func Resolve(args Args, requireCred bool) (Resolved, error) {
 		// explicit --model flag), repair the config so the warning
 		// doesn't repeat on every launch.
 
-		// Gateway providers (openrouter, vercel-ai-gateway, etc.) are
-		// open-catalogue: even model ids not in any catalog are valid
-		// as long as the upstream gateway recognises them. Create a
-		// synthetic model entry instead of overwriting the user's choice.
-		if isGatewayProvider(provName) {
+		// Gateway providers can accept route-qualified ids that are not in
+		// zot's local catalog yet, for example OpenRouter's
+		// "deepseek/deepseek-v4-flash". Preserve only route-qualified ids;
+		// plain unknown values are likely typos and should still fall back.
+		if isGatewayProvider(provName) && isGatewayRoutedModelID(model) {
 			resolvedModel = provider.Model{
 				Provider:      provName,
 				ID:            model,
 				DisplayName:   model,
 				ContextWindow: 1000000,
 				MaxOutput:     64000,
-				Reasoning:     true,
 				BaseURL:       "",
-				Source:        "user",
+				Source:        "gateway",
 			}
 			err = nil
-			// Don't repair config — the model id is valid for this gateway.
+			// Don't repair config — the routed model id may be valid upstream.
 		} else {
 			fallback := defaultModelForProvider(provName)
 			fm, ferr := provider.FindModel(provName, fallback)

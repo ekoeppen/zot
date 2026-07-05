@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/patriceckhart/zot/packages/provider"
@@ -46,18 +47,26 @@ func LoadUserModels() {
 	provider.SetUserModels(models)
 }
 
-// isGatewayProvider returns true for providers that act as routers or
-// gateways serving models from any provider in the catalog (OpenRouter,
-// Vercel AI Gateway, Cloudflare AI Gateway, etc.). For these providers
-// the model id is never repaired — a model that lives under "deepseek"
-// in the catalog is perfectly valid when served through OpenRouter.
+// isGatewayProvider returns true for providers whose OpenAI-compatible
+// endpoint can accept routed model IDs that are not present in zot's local
+// catalog. Vercel AI Gateway is intentionally not listed here: zot currently
+// talks to it through the Anthropic-compatible client, which still requires
+// catalog metadata for request shaping.
 func isGatewayProvider(prov string) bool {
 	switch prov {
-	case "openrouter", "vercel-ai-gateway", "cloudflare-ai-gateway":
+	case "openrouter", "cloudflare-ai-gateway":
 		return true
 	default:
 		return false
 	}
+}
+
+// isGatewayRoutedModelID reports whether a model looks like the routed IDs
+// used by gateway providers, for example "deepseek/deepseek-v4-flash".
+// Non-routed typos like "deepseek-v4-flashh" should still be repaired to a
+// known default instead of being silently accepted.
+func isGatewayRoutedModelID(model string) bool {
+	return strings.Contains(strings.TrimSpace(model), "/")
 }
 
 // ValidateAndRepairConfig checks the persisted config.json's
@@ -71,9 +80,8 @@ func isGatewayProvider(prov string) bool {
 //     (e.g. provider=anthropic + model=kimi-for-coding from a stale
 //     half-applied switch) -> reset model to the provider's default.
 //
-// Gateway providers (openrouter, vercel-ai-gateway, cloudflare-ai-gateway)
-// are exempt from the cross-provider model check because they can serve
-// any model from the catalog.
+// Gateway providers are exempt from the cross-provider model check for routed
+// model IDs because those IDs can be valid even when absent from zot's catalog.
 //
 // Silent on success; one stderr line per repair. Errors loading or
 // saving the file are non-fatal — the caller continues with defaults.
@@ -94,11 +102,11 @@ func ValidateAndRepairConfig() {
 
 	if cfg.Provider != "" && cfg.Model != "" {
 		if _, err := provider.FindModel(cfg.Provider, cfg.Model); err != nil {
-			// Gateway providers (openrouter, vercel-ai-gateway, etc.) can
-			// serve any model from the catalog. A model id that belongs to
-			// "deepseek" is perfectly valid when served through OpenRouter.
-			if isGatewayProvider(cfg.Provider) {
-				// Provider is a router; skip the cross-provider model repair.
+			// Gateway providers can serve routed model ids like
+			// "deepseek/deepseek-v4-flash" even when the local catalog does not
+			// know them. Preserve only routed ids; plain typos are still repaired.
+			if isGatewayProvider(cfg.Provider) && isGatewayRoutedModelID(cfg.Model) {
+				// Provider is a router and the id is route-qualified; preserve it.
 			} else if m, err := provider.FindModel("", cfg.Model); err == nil {
 				fix := defaultModelForProvider(cfg.Provider)
 				fmt.Fprintf(os.Stderr,

@@ -101,6 +101,43 @@ func TestValidateAndRepairConfig_DuplicateModelIDValidForConfiguredProvider(t *t
 	}
 }
 
+func TestValidateAndRepairConfig_OpenRouterPreservesRoutedModelID(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ZOT_HOME", home)
+
+	want := "deepseek/deepseek-v4-flash"
+	b, _ := json.Marshal(Config{Provider: "openrouter", Model: want})
+	_ = os.WriteFile(filepath.Join(home, "config.json"), b, 0o644)
+
+	ValidateAndRepairConfig()
+
+	out, _ := LoadConfig()
+	if out.Provider != "openrouter" {
+		t.Errorf("provider mutated: %q", out.Provider)
+	}
+	if out.Model != want {
+		t.Errorf("routed model id mutated: got %q, want %q", out.Model, want)
+	}
+}
+
+func TestValidateAndRepairConfig_GatewayPlainUnknownModelStillRepairs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ZOT_HOME", home)
+
+	b, _ := json.Marshal(Config{Provider: "openrouter", Model: "not-a-routed-model"})
+	_ = os.WriteFile(filepath.Join(home, "config.json"), b, 0o644)
+
+	ValidateAndRepairConfig()
+
+	out, _ := LoadConfig()
+	if out.Provider != "openrouter" {
+		t.Errorf("provider mutated: %q", out.Provider)
+	}
+	if out.Model == "not-a-routed-model" || out.Model == "" {
+		t.Errorf("plain unknown gateway model was not repaired: %q", out.Model)
+	}
+}
+
 // TestValidateAndRepairConfig_HappyPath leaves a valid config alone.
 func TestValidateAndRepairConfig_HappyPath(t *testing.T) {
 	home := t.TempDir()
