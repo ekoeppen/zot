@@ -27,17 +27,16 @@ import (
 // inherited). See botcmd_unix.go and botcmd_windows.go.
 var detachChild func(cmd *exec.Cmd)
 
-// runBotCommand dispatches `zot telegram-bot ...` subcommands. The
-// short alias "tg" is also accepted. Returns true if rawArgs begins
-// with a recognised subcommand, false otherwise.
+// runBotCommand dispatches `zot <protocol>-bot ...` subcommands via
+// the botSpec registry. Returns true if rawArgs begins with a
+// recognised subcommand, false otherwise. The short alias "tg" (and
+// "mx" for matrix) are also accepted.
 func runBotCommand(rawArgs []string, version string) (handled bool, err error) {
 	if len(rawArgs) == 0 {
 		return false, nil
 	}
-	switch rawArgs[0] {
-	case "telegram-bot", "tg":
-		// recognised
-	default:
+	spec := specFor(rawArgs[0])
+	if spec == nil {
 		return false, nil
 	}
 	sub := ""
@@ -48,164 +47,43 @@ func runBotCommand(rawArgs []string, version string) (handled bool, err error) {
 	}
 	switch sub {
 	case "", "help", "-h", "--help":
-		printBotHelp()
+		spec.printHelp()
 		return true, nil
 	case "setup":
-		return true, botSetup(tail)
+		return true, spec.setup(tail)
 	case "status":
-		return true, botStatus()
+		return true, spec.status()
 	case "reset":
-		return true, botReset()
+		return true, spec.reset()
 	case "run":
-		return true, botRun(tail, version)
+		return true, botRun(spec, tail, version)
 	case "start":
-		return true, botStart(tail)
+		return true, botStart(spec, tail)
 	case "stop":
-		return true, botStop()
+		return true, botStop(spec)
 	case "logs":
-		return true, botLogs(tail)
+		return true, botLogs(spec, tail)
 	default:
-		printBotHelp()
-		return true, fmt.Errorf("unknown bot subcommand %q", sub)
+		spec.printHelp()
+		return true, fmt.Errorf("unknown %s subcommand %q", spec.subcommand, sub)
 	}
 }
 
-// printBotHelp prints usage for `zot bot`.
-func printBotHelp() {
-	fmt.Fprint(os.Stderr, `zot telegram-bot — telegram bridge
-
-usage:
-  zot telegram-bot setup                       paste a BotFather token, verify, save
-  zot telegram-bot status                      show bridge config and whether it's running
-  zot telegram-bot run [flags]                 run in the foreground (ctrl+c to stop)
-  zot telegram-bot start [flags]               launch in background, detach, return immediately
-  zot telegram-bot stop                        sigterm the running background bot, sigkill if needed
-  zot telegram-bot logs [--follow]             tail the background bot's log file
-  zot telegram-bot reset                       forget token + allowed user
-
-setup flow:
-  1. talk to @BotFather on telegram, /newbot, copy the token
-  2. run "zot telegram-bot setup" and paste the token
-  3. run "zot telegram-bot start" (background) or "zot telegram-bot run" (foreground)
-  4. send /start to your bot from telegram; the first sender claims it
-
-while the bot is running, dm it anything and the message is forwarded
-to the agent the same way it would be from the tui. image attachments
-(photos or image/* documents) are passed to vision-capable models.
-telegram commands the bot handles directly: /help, /status, /stop.
-
-config & state:
-  $ZOT_HOME/bot.json       # bot token + paired user (mode 0600)
-  $ZOT_HOME/bot.pid        # pid of the running bot (written by run/start)
-  $ZOT_HOME/logs/bot.log   # stdout+stderr from "zot telegram-bot start"
-`)
-}
-
-// botSetup interactively reads a bot token, verifies it via getMe, and saves it.
-func botSetup(_ []string) error {
-	cfg, err := telegram.LoadConfig(ZotHome())
-	if err != nil {
-		return err
-	}
-
-	fmt.Print("telegram bot token (from @BotFather): ")
-	reader := bufio.NewReader(os.Stdin)
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return err
-	}
-	token := strings.TrimSpace(line)
-	if token == "" {
-		return fmt.Errorf("no token provided")
-	}
-
-	client := telegram.NewClient(token)
-	me, err := client.GetMe(context.Background())
-	if err != nil {
-		return fmt.Errorf("token rejected by telegram: %w", err)
-	}
-	cfg.BotToken = token
-	cfg.BotUsername = me.Username
-	cfg.BotID = me.ID
-	// Any stored pairing might be for a different bot; clear it.
-	cfg.AllowedUserID = 0
-	cfg.LastUpdateID = 0
-	if err := telegram.SaveConfig(ZotHome(), cfg); err != nil {
-		return err
-	}
-	fmt.Printf("\nsaved: @%s (id=%d) to %s\n", me.Username, me.ID, telegram.ConfigPath(ZotHome()))
-	fmt.Println("next: run `zot telegram-bot run`, then send /start to your bot from telegram.")
-	return nil
-}
-
-// botStatus prints the current bot config without the token, plus
-// whether the background process is alive.
-func botStatus() error {
-	cfg, err := telegram.LoadConfig(ZotHome())
-	if err != nil {
-		return err
-	}
-	if cfg.BotToken == "" {
-		fmt.Println("telegram: not configured (run `zot telegram-bot setup`)")
-		return nil
-	}
-	maskedTok := maskToken(cfg.BotToken)
-	fmt.Printf("telegram bot: @%s (id=%d)\n", cfg.BotUsername, cfg.BotID)
-	fmt.Printf("token:        %s\n", maskedTok)
-	if cfg.AllowedUserID == 0 {
-		fmt.Println("paired with:  (unpaired — send /start from telegram to claim)")
-	} else {
-		fmt.Printf("paired with:  telegram user id %d\n", cfg.AllowedUserID)
-	}
-	fmt.Printf("last update:  %d\n", cfg.LastUpdateID)
-	fmt.Printf("config file:  %s\n", telegram.ConfigPath(ZotHome()))
-
-	pid, alive, _ := telegram.IsRunning(ZotHome())
-	switch {
-	case alive:
-		fmt.Printf("process:      running (pid %d)\n", pid)
-	case pid > 0:
-		fmt.Printf("process:      stopped (stale pid %d in %s)\n", pid, telegram.PIDPath(ZotHome()))
-	default:
-		fmt.Println("process:      stopped")
-	}
-	logPath := telegram.LogPath(ZotHome())
-	if fi, err := os.Stat(logPath); err == nil {
-		fmt.Printf("log file:     %s (%d bytes)\n", logPath, fi.Size())
-	}
-	return nil
-}
-
-// botReset wipes the on-disk bot.json entry.
-func botReset() error {
-	p := telegram.ConfigPath(ZotHome())
-	if _, err := os.Stat(p); os.IsNotExist(err) {
-		fmt.Println("no bot config to reset")
-		return nil
-	}
-	if err := os.Remove(p); err != nil {
-		return err
-	}
-	fmt.Println("removed", p)
-	return nil
-}
-
-// botStart launches `zot telegram-bot run` as a detached child process, writes
-// its pid to $ZOT_HOME/bot.pid, and returns immediately. Stdout/stderr
-// of the child are redirected to $ZOT_HOME/logs/bot.log.
-func botStart(rawTail []string) error {
+// botStart launches `zot <spec.subcommand> run` as a detached child
+// process, writes its pid to the spec's pid file, and returns
+// immediately. Stdout/stderr of the child are redirected to the spec's
+// log file.
+func botStart(spec *botSpec, rawTail []string) error {
 	// Refuse to start if another bot is already running.
-	if pid, alive, _ := telegram.IsRunning(ZotHome()); alive {
-		return fmt.Errorf("bot is already running (pid %d); use `zot telegram-bot stop` first", pid)
+	if pid, alive, _ := bot.IsRunningAt(spec.pidPath(ZotHome())); alive {
+		return fmt.Errorf("%s is already running (pid %d); use `zot %s stop` first", spec.name, pid, spec.subcommand)
 	}
-	_ = telegram.RemovePID(ZotHome()) // clear any stale pid file
+	_ = bot.RemovePIDFile(spec.pidPath(ZotHome())) // clear any stale pid file
 
-	cfg, err := telegram.LoadConfig(ZotHome())
-	if err != nil {
-		return err
-	}
-	if cfg.BotToken == "" {
-		return fmt.Errorf("no bot token configured — run `zot telegram-bot setup` first")
+	if ok, cerr := spec.configured(ZotHome()); cerr != nil {
+		return cerr
+	} else if !ok {
+		return fmt.Errorf("%s is not configured — run `zot %s setup` first", spec.name, spec.subcommand)
 	}
 
 	self, err := os.Executable()
@@ -213,7 +91,7 @@ func botStart(rawTail []string) error {
 		return fmt.Errorf("locate zot binary: %w", err)
 	}
 
-	logPath := telegram.LogPath(ZotHome())
+	logPath := spec.logPath(ZotHome())
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return err
 	}
@@ -231,9 +109,9 @@ func botStart(rawTail []string) error {
 		return fmt.Errorf("detected `go run` temp binary at %s — run `make install` (or copy ./bin/zot to your PATH) and use the installed binary for `start`", self)
 	}
 
-	// Child argv: same flags the user passed to `zot telegram-bot start`,
-	// mapped to `zot telegram-bot run`. Preserves --provider, --model, --cwd, etc.
-	args := append([]string{"telegram-bot", "run"}, rawTail...)
+	// Child argv: same flags the user passed to `zot <sub> start`,
+	// mapped to `zot <sub> run`. Preserves --provider, --model, --cwd, etc.
+	args := append([]string{spec.subcommand, "run"}, rawTail...)
 	cmd := exec.Command(self, args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -246,51 +124,51 @@ func botStart(rawTail []string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("spawn: %w", err)
 	}
-	if err := telegram.WritePID(ZotHome(), cmd.Process.Pid); err != nil {
+	if err := bot.WritePIDFile(spec.pidPath(ZotHome()), cmd.Process.Pid); err != nil {
 		_ = cmd.Process.Kill()
 		return fmt.Errorf("write pid: %w", err)
 	}
 	// Don't wait() — detach. OS will reparent the child to init when we exit.
 	go func() { _ = cmd.Process.Release() }()
 
-	fmt.Printf("started zot telegram-bot as pid %d (logs: %s)\n", cmd.Process.Pid, logPath)
-	fmt.Println("use `zot telegram-bot logs -f` to tail, `zot telegram-bot stop` to stop.")
+	fmt.Printf("started zot %s as pid %d (logs: %s)\n", spec.subcommand, cmd.Process.Pid, logPath)
+	fmt.Printf("use `zot %s logs -f` to tail, `zot %s stop` to stop.\n", spec.subcommand, spec.subcommand)
 	return nil
 }
 
 // botStop sends SIGTERM to the running bot (SIGKILL if it doesn't
 // exit within 5s) and cleans up the pid file.
-func botStop() error {
-	pid, alive, err := telegram.IsRunning(ZotHome())
+func botStop(spec *botSpec) error {
+	pid, alive, err := bot.IsRunningAt(spec.pidPath(ZotHome()))
 	if err != nil {
 		return err
 	}
 	if !alive {
 		if pid > 0 {
-			_ = telegram.RemovePID(ZotHome())
+			_ = bot.RemovePIDFile(spec.pidPath(ZotHome()))
 			fmt.Printf("no live process; cleared stale pid %d\n", pid)
 			return nil
 		}
-		fmt.Println("bot is not running")
+		fmt.Printf("%s is not running\n", spec.name)
 		return nil
 	}
-	if err := telegram.StopProcess(pid, 5*time.Second); err != nil {
+	if err := bot.StopProcess(pid, 5*time.Second); err != nil {
 		return fmt.Errorf("stop pid %d: %w", pid, err)
 	}
-	_ = telegram.RemovePID(ZotHome())
+	_ = bot.RemovePIDFile(spec.pidPath(ZotHome()))
 	fmt.Printf("stopped pid %d\n", pid)
 	return nil
 }
 
 // botLogs prints (or tails with --follow) the bot log file.
-func botLogs(rawTail []string) error {
+func botLogs(spec *botSpec, rawTail []string) error {
 	follow := false
 	for _, a := range rawTail {
 		if a == "-f" || a == "--follow" {
 			follow = true
 		}
 	}
-	p := telegram.LogPath(ZotHome())
+	p := spec.logPath(ZotHome())
 	f, err := os.Open(p)
 	if errors.Is(err, os.ErrNotExist) {
 		fmt.Println("no log file at", p)
@@ -325,7 +203,7 @@ func botLogs(rawTail []string) error {
 }
 
 // botRun starts the polling loop in the foreground. Ctrl+C stops it.
-func botRun(rawTail []string, version string) error {
+func botRun(spec *botSpec, rawTail []string, version string) error {
 	// Parse only a small subset of flags relevant to bot run. We reuse
 	// the main args parser so --provider/--model/--cwd/--api-key/--reasoning
 	// behave the same as in the tui.
@@ -340,12 +218,14 @@ func botRun(rawTail []string, version string) error {
 		return err
 	}
 
-	cfg, err := telegram.LoadConfig(ZotHome())
+	if ok, cerr := spec.configured(ZotHome()); cerr != nil {
+		return cerr
+	} else if !ok {
+		return fmt.Errorf("%s is not configured — run `zot %s setup` first", spec.name, spec.subcommand)
+	}
+	adapter, err := spec.newAdapter(ZotHome())
 	if err != nil {
 		return err
-	}
-	if cfg.BotToken == "" {
-		return fmt.Errorf("no bot token configured — run `zot telegram-bot setup` first")
 	}
 
 	agent := resolved.NewAgent()
@@ -372,14 +252,6 @@ func botRun(rawTail []string, version string) error {
 		}
 	}
 
-	// Construct the Telegram adapter and generic runner.
-	adapter := telegram.NewAdapter(
-		telegram.NewClient(cfg.BotToken),
-		&cfg,
-		func(c telegram.Config) error {
-			return telegram.SaveConfig(ZotHome(), c)
-		},
-	)
 	var runner *bot.Runner
 	runner = bot.NewRunner(adapter, agent, bot.Config{
 		ZotHome:    ZotHome(),
@@ -403,10 +275,10 @@ func botRun(rawTail []string, version string) error {
 		},
 	})
 
-	// Record our pid so `zot telegram-bot status` / `zot telegram-bot stop` can find us,
-	// regardless of whether we were started directly or via `bot start`.
-	_ = telegram.WritePID(ZotHome(), os.Getpid())
-	defer telegram.RemovePID(ZotHome())
+	// Record our pid so `zot <sub> status` / `zot <sub> stop` can find us,
+	// regardless of whether we were started directly or via `start`.
+	_ = bot.WritePIDFile(spec.pidPath(ZotHome()), os.Getpid())
+	defer bot.RemovePIDFile(spec.pidPath(ZotHome()))
 
 	// Translate sigterm/sigint into a context cancel so the bot's goroutines
 	// and the currently-running turn wind down cleanly.
@@ -454,4 +326,159 @@ func maskToken(tok string) string {
 		return tok[:i+1] + "<hidden>"
 	}
 	return tok[:i+1] + body[:3] + "..." + body[len(body)-3:]
+}
+
+// telegramSpec wires the existing Telegram setup/status/reset flows
+// into the generic dispatcher. Bodies are the pre-refactor botSetup,
+// botStatus, botReset, printBotHelp — unchanged.
+func telegramSpec() *botSpec {
+	return &botSpec{
+		name:       "telegram",
+		subcommand: "telegram-bot",
+		aliases:    []string{"tg"},
+		pidPath:    telegram.PIDPath,
+		logPath:    telegram.LogPath,
+		configured: func(zotHome string) (bool, error) {
+			cfg, err := telegram.LoadConfig(zotHome)
+			if err != nil {
+				return false, err
+			}
+			return cfg.BotToken != "", nil
+		},
+		printHelp:  printTelegramBotHelp,
+		setup:      telegramBotSetup,
+		status:     telegramBotStatus,
+		reset:      telegramBotReset,
+		newAdapter: func(zotHome string) (bot.BotAdapter, error) {
+			cfg, err := telegram.LoadConfig(zotHome)
+			if err != nil {
+				return nil, err
+			}
+			return telegram.NewAdapter(
+				telegram.NewClient(cfg.BotToken),
+				&cfg,
+				func(c telegram.Config) error { return telegram.SaveConfig(zotHome, c) },
+			), nil
+		},
+	}
+}
+
+// printTelegramBotHelp prints usage for `zot telegram-bot`.
+func printTelegramBotHelp() {
+	fmt.Fprint(os.Stderr, `zot telegram-bot — telegram bridge
+
+usage:
+  zot telegram-bot setup                       paste a BotFather token, verify, save
+  zot telegram-bot status                      show bridge config and whether it's running
+  zot telegram-bot run [flags]                 run in the foreground (ctrl+c to stop)
+  zot telegram-bot start [flags]               launch in background, detach, return immediately
+  zot telegram-bot stop                        sigterm the running background bot, sigkill if needed
+  zot telegram-bot logs [--follow]             tail the background bot's log file
+  zot telegram-bot reset                       forget token + allowed user
+
+setup flow:
+  1. talk to @BotFather on telegram, /newbot, copy the token
+  2. run "zot telegram-bot setup" and paste the token
+  3. run "zot telegram-bot start" (background) or "zot telegram-bot run" (foreground)
+  4. send /start to your bot from telegram; the first sender claims it
+
+while the bot is running, dm it anything and the message is forwarded
+to the agent the same way it would be from the tui. image attachments
+(photos or image/* documents) are passed to vision-capable models.
+telegram commands the bot handles directly: /help, /status, /stop.
+
+config & state:
+  $ZOT_HOME/bot.json       # bot token + paired user (mode 0600)
+  $ZOT_HOME/bot.pid        # pid of the running bot (written by run/start)
+  $ZOT_HOME/logs/bot.log   # stdout+stderr from "zot telegram-bot start"
+`)
+}
+
+// telegramBotSetup interactively reads a bot token, verifies it via getMe, and saves it.
+func telegramBotSetup(_ []string) error {
+	cfg, err := telegram.LoadConfig(ZotHome())
+	if err != nil {
+		return err
+	}
+
+	fmt.Print("telegram bot token (from @BotFather): ")
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return err
+	}
+	token := strings.TrimSpace(line)
+	if token == "" {
+		return fmt.Errorf("no token provided")
+	}
+
+	client := telegram.NewClient(token)
+	me, err := client.GetMe(context.Background())
+	if err != nil {
+		return fmt.Errorf("token rejected by telegram: %w", err)
+	}
+	cfg.BotToken = token
+	cfg.BotUsername = me.Username
+	cfg.BotID = me.ID
+	// Any stored pairing might be for a different bot; clear it.
+	cfg.AllowedUserID = 0
+	cfg.LastUpdateID = 0
+	if err := telegram.SaveConfig(ZotHome(), cfg); err != nil {
+		return err
+	}
+	fmt.Printf("\nsaved: @%s (id=%d) to %s\n", me.Username, me.ID, telegram.ConfigPath(ZotHome()))
+	fmt.Println("next: run `zot telegram-bot run`, then send /start to your bot from telegram.")
+	return nil
+}
+
+// telegramBotStatus prints the current bot config without the token, plus
+// whether the background process is alive.
+func telegramBotStatus() error {
+	cfg, err := telegram.LoadConfig(ZotHome())
+	if err != nil {
+		return err
+	}
+	if cfg.BotToken == "" {
+		fmt.Println("telegram: not configured (run `zot telegram-bot setup`)")
+		return nil
+	}
+	maskedTok := maskToken(cfg.BotToken)
+	fmt.Printf("telegram bot: @%s (id=%d)\n", cfg.BotUsername, cfg.BotID)
+	fmt.Printf("token:        %s\n", maskedTok)
+	if cfg.AllowedUserID == 0 {
+		fmt.Println("paired with:  (unpaired — send /start from telegram to claim)")
+	} else {
+		fmt.Printf("paired with:  telegram user id %d\n", cfg.AllowedUserID)
+	}
+	fmt.Printf("last update:  %d\n", cfg.LastUpdateID)
+	fmt.Printf("config file:  %s\n", telegram.ConfigPath(ZotHome()))
+
+	pid, alive, _ := telegram.IsRunning(ZotHome())
+	switch {
+	case alive:
+		fmt.Printf("process:      running (pid %d)\n", pid)
+	case pid > 0:
+		fmt.Printf("process:      stopped (stale pid %d in %s)\n", pid, telegram.PIDPath(ZotHome()))
+	default:
+		fmt.Println("process:      stopped")
+	}
+	logPath := telegram.LogPath(ZotHome())
+	if fi, err := os.Stat(logPath); err == nil {
+		fmt.Printf("log file:     %s (%d bytes)\n", logPath, fi.Size())
+	}
+	return nil
+}
+
+// telegramBotReset wipes the on-disk bot.json entry.
+func telegramBotReset() error {
+	p := telegram.ConfigPath(ZotHome())
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		fmt.Println("no bot config to reset")
+		return nil
+	}
+	if err := os.Remove(p); err != nil {
+		return err
+	}
+	fmt.Println("removed", p)
+	return nil
 }
