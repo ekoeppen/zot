@@ -82,7 +82,8 @@ type gemPart struct {
 	FunctionResponse *gemFunctionResponse `json:"functionResponse,omitempty"`
 	// Thought: true marks a thought-summary part. Outgoing parts
 	// from zot never set this; incoming chunks might.
-	Thought bool `json:"thought,omitempty"`
+	Thought          bool   `json:"thought,omitempty"`
+	ThoughtSignature string `json:"thoughtSignature,omitempty"`
 }
 
 type gemContent struct {
@@ -288,6 +289,16 @@ func convertGemAssistantParts(blocks []Content, functionsEnabled bool) []gemPart
 	var parts []gemPart
 	for _, b := range blocks {
 		switch v := b.(type) {
+		case ReasoningBlock:
+			// Vertex AI requires thought parts with their signature to be
+			// replayed verbatim on follow-up turns.
+			if v.Encrypted != "" || v.Summary != "" {
+				parts = append(parts, gemPart{
+					Text:             v.Summary,
+					Thought:          true,
+					ThoughtSignature: v.Encrypted,
+				})
+			}
 		case TextBlock:
 			if strings.TrimSpace(v.Text) == "" {
 				continue
@@ -306,6 +317,7 @@ func convertGemAssistantParts(blocks []Content, functionsEnabled bool) []gemPart
 					Name: v.Name,
 					Args: args,
 				},
+				ThoughtSignature: v.ThoughtSignature,
 			})
 		}
 	}
@@ -508,13 +520,16 @@ func (c *geminiClient) runStream(ctx context.Context, resp *http.Response, req R
 	// candidate carries a list of parts (text or functionCall),
 	// possibly accumulating across chunks.
 	type blockEntry struct {
-		kind      string // "text" | "image" | "tool_use"
-		textBuf   strings.Builder
-		image     *ImageBlock
-		imagePath string
-		toolID    string
-		toolName  string
-		toolArgs  strings.Builder
+		kind               string // "text" | "image" | "tool_use" | "reasoning"
+		textBuf            strings.Builder
+		image              *ImageBlock
+		imagePath          string
+		toolID             string
+		toolName           string
+		toolArgs           strings.Builder
+		toolThoughtSig     string
+		reasoningSummary   string
+		reasoningSignature string
 	}
 	var (
 		blocks      []*blockEntry
@@ -580,6 +595,11 @@ func (c *geminiClient) runStream(ctx context.Context, resp *http.Response, req R
 						content = append(content, TextBlock{Text: fmt.Sprintf("Saved image: `%s`", b.imagePath)})
 					}
 				}
+			case "reasoning":
+				content = append(content, ReasoningBlock{
+					Summary:   b.reasoningSummary,
+					Encrypted: b.reasoningSignature,
+				})
 			case "tool_use":
 				args := b.toolArgs.String()
 				if args == "" || !json.Valid([]byte(args)) {
@@ -587,6 +607,7 @@ func (c *geminiClient) runStream(ctx context.Context, resp *http.Response, req R
 				}
 				content = append(content, ToolCallBlock{
 					ID: b.toolID, Name: b.toolName, Arguments: json.RawMessage(args),
+					ThoughtSignature: b.toolThoughtSig,
 				})
 			}
 		}
@@ -622,6 +643,7 @@ func (c *geminiClient) runStream(ctx context.Context, resp *http.Response, req R
 							Text             string           `json:"text"`
 							InlineData       *gemInlineData   `json:"inlineData"`
 							Thought          bool             `json:"thought"`
+							ThoughtSignature string           `json:"thoughtSignature"`
 							FunctionCall     *gemFunctionCall `json:"functionCall"`
 							FunctionCallID   string           `json:"id"`
 							FunctionCallName string           `json:"name"`
@@ -665,6 +687,7 @@ func (c *geminiClient) runStream(ctx context.Context, resp *http.Response, req R
 							args = json.RawMessage("{}")
 						}
 						t := startTool(part.FunctionCall.Name, part.FunctionCallID, args)
+						t.toolThoughtSig = part.ThoughtSignature
 						out <- EventToolStart{ID: t.toolID, Name: t.toolName}
 						out <- EventToolArgs{ID: t.toolID, Delta: t.toolArgs.String()}
 						out <- EventToolEnd{ID: t.toolID}
@@ -674,10 +697,15 @@ func (c *geminiClient) runStream(ctx context.Context, resp *http.Response, req R
 						continue
 					}
 					if part.Thought {
-						// Thinking summaries arrive as text parts
-						// with thought=true. Not surfaced to the
-						// user in v1; could be exposed via a
-						// future ReasoningBlock if useful.
+						// Store thought parts as ReasoningBlocks so
+						// Vertex AI can replay the thought_signature
+						// on follow-up turns (required by the API).
+						blocks = append(blocks, &blockEntry{
+							kind:               "reasoning",
+							reasoningSummary:   part.Text,
+							reasoningSignature: part.ThoughtSignature,
+						})
+						currentText = nil
 						continue
 					}
 					appendText(part.Text)

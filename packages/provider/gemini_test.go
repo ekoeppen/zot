@@ -375,3 +375,189 @@ func TestDiscoverGoogle(t *testing.T) {
 		t.Errorf("second model wrong: %+v", got[1])
 	}
 }
+
+// TestSanitizeGeminiToolSchemaEmptyOrInvalid covers the pre-existing
+// fallback behavior for empty/invalid input, to make sure the new logic
+// didn't regress it.
+func TestSanitizeGeminiToolSchemaEmptyOrInvalid(t *testing.T) {
+	for _, in := range []json.RawMessage{nil, json.RawMessage(``), json.RawMessage(`not json`)} {
+		out := sanitizeGeminiToolSchema(in)
+		var got map[string]any
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("fallback schema is not valid JSON: %v (%s)", err, out)
+		}
+		if got["type"] != "object" {
+			t.Fatalf("want type=object fallback, got %+v", got)
+		}
+		if _, ok := got["properties"].(map[string]any); !ok {
+			t.Fatalf("want properties object fallback, got %+v", got)
+		}
+	}
+}
+
+// TestGeminiStreamReasoning confirms that when the Gemini SSE stream
+// contains thought blocks with a signature, they are correctly mapped to
+// ReasoningBlock structures inside the final assistant message.
+func TestGeminiStreamReasoning(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		write := func(s string) {
+			_, _ = w.Write([]byte(s))
+			if fl != nil {
+				fl.Flush()
+			}
+		}
+		// Write a thought part with signature, then text, then usage containing thoughtsTokenCount.
+		write("data: " + `{"candidates":[{"content":{"role":"model","parts":[{"text":"Thinking hard","thought":true,"thoughtSignature":"sig123"}]}}]}` + "\n\n")
+		write("data: " + `{"candidates":[{"content":{"role":"model","parts":[{"text":"Answer text"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"thoughtsTokenCount":3,"totalTokenCount":10}}` + "\n\n")
+	}))
+	defer srv.Close()
+
+	c := NewGemini("k", srv.URL)
+	evs, err := c.Stream(context.Background(), Request{Model: "gemini-2.5-pro"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var gotText string
+	var done EventDone
+	var usage Usage
+	for ev := range evs {
+		switch e := ev.(type) {
+		case EventTextDelta:
+			gotText += e.Delta
+		case EventUsage:
+			usage = e.Usage
+		case EventDone:
+			done = e
+		}
+	}
+
+	if gotText != "Answer text" {
+		t.Fatalf("text=%q", gotText)
+	}
+	if usage.OutputTokens != 5 { // candidatesTokenCount (2) + thoughtsTokenCount (3)
+		t.Fatalf("usage output tokens=%d, want 5", usage.OutputTokens)
+	}
+
+	// Verify that the final message contains both the ReasoningBlock and the TextBlock
+	msg := done.Message
+	if len(msg.Content) != 2 {
+		t.Fatalf("want 2 content blocks, got %d: %+v", len(msg.Content), msg.Content)
+	}
+
+	rb, ok := msg.Content[0].(ReasoningBlock)
+	if !ok {
+		t.Fatalf("first block should be ReasoningBlock, got %T", msg.Content[0])
+	}
+	if rb.Summary != "Thinking hard" || rb.Encrypted != "sig123" {
+		t.Fatalf("invalid ReasoningBlock: %+v", rb)
+	}
+
+	tb, ok := msg.Content[1].(TextBlock)
+	if !ok {
+		t.Fatalf("second block should be TextBlock, got %T", msg.Content[1])
+	}
+	if tb.Text != "Answer text" {
+		t.Fatalf("invalid TextBlock: %+v", tb)
+	}
+}
+
+// TestGeminiBuildRequestWithReasoningReplay verifies that when zot sends a
+// historical assistant message containing a ReasoningBlock, buildRequest
+// serializes it into the verbatim Gemini "thought: true" wire representation
+// with its corresponding thoughtSignature.
+func TestGeminiBuildRequestWithReasoningReplay(t *testing.T) {
+	c := NewGemini("k", "https://example.invalid").(*geminiClient)
+	wire, _, err := c.buildRequest(Request{
+		Model: "gemini-2.5-pro",
+		Messages: []Message{
+			{Role: RoleUser, Content: []Content{TextBlock{Text: "Why is the sky blue?"}}},
+			{Role: RoleAssistant, Content: []Content{
+				ReasoningBlock{Summary: "Evaluating Rayleigh scattering", Encrypted: "sky-sig-999"},
+				TextBlock{Text: "It scatters blue light more than other colors."},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(wire.Contents) != 2 {
+		t.Fatalf("want 2 messages in wire, got %d", len(wire.Contents))
+	}
+
+	assistant := wire.Contents[1]
+	if assistant.Role != "model" {
+		t.Fatalf("assistant role should be 'model', got %q", assistant.Role)
+	}
+
+	if len(assistant.Parts) != 2 {
+		t.Fatalf("want 2 parts, got %d: %+v", len(assistant.Parts), assistant.Parts)
+	}
+
+	// Check the serialized ReasoningBlock
+	p0 := assistant.Parts[0]
+	if !p0.Thought {
+		t.Errorf("part 0: expected Thought=true, got %+v", p0)
+	}
+	if p0.Text != "Evaluating Rayleigh scattering" {
+		t.Errorf("part 0: expected text to match summary, got %q", p0.Text)
+	}
+	if p0.ThoughtSignature != "sky-sig-999" {
+		t.Errorf("part 0: expected thought signature 'sky-sig-999', got %q", p0.ThoughtSignature)
+	}
+
+	// Check the serialized TextBlock
+	p1 := assistant.Parts[1]
+	if p1.Thought {
+		t.Errorf("part 1: expected Thought=false, got %+v", p1)
+	}
+	if p1.Text != "It scatters blue light more than other colors." {
+		t.Errorf("part 1: expected text to match, got %q", p1.Text)
+	}
+}
+
+// TestGeminiStreamToolCallWithThoughtSignature confirms that a tool call
+// featuring a thoughtSignature in the SSE stream successfully extracts and
+// attaches the thought signature onto the final ToolCallBlock.
+func TestGeminiStreamToolCallWithThoughtSignature(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: " + `{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"read","args":{"path":"a"}},"thoughtSignature":"tool-sig-456"}]},"finishReason":"STOP"}]}` + "\n\n"))
+	}))
+	defer srv.Close()
+
+	c := NewGemini("k", srv.URL)
+	evs, err := c.Stream(context.Background(), Request{Model: "gemini-2.5-pro"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var done EventDone
+	for ev := range evs {
+		if e, ok := ev.(EventDone); ok {
+			done = e
+		}
+	}
+
+	if len(done.Message.Content) != 1 {
+		t.Fatalf("want 1 content block, got %d", len(done.Message.Content))
+	}
+
+	tc, ok := done.Message.Content[0].(ToolCallBlock)
+	if !ok {
+		t.Fatalf("expected ToolCallBlock, got %T", done.Message.Content[0])
+	}
+
+	if tc.Name != "read" {
+		t.Fatalf("tool name=%q, want 'read'", tc.Name)
+	}
+
+	if tc.ThoughtSignature != "tool-sig-456" {
+		t.Fatalf("tool block thought signature=%q, want 'tool-sig-456'", tc.ThoughtSignature)
+	}
+}

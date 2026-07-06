@@ -43,9 +43,12 @@ func (ImageBlock) isContent() {}
 
 // ToolCallBlock is an assistant-issued call to a tool.
 type ToolCallBlock struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	Arguments        json.RawMessage `json:"arguments"`
+	// ThoughtSignature carries the Vertex AI thought_signature that must
+	// be replayed on the functionCall part in follow-up turns.
+	ThoughtSignature string          `json:"thought_signature,omitempty"`
 }
 
 func (ToolCallBlock) isContent() {}
