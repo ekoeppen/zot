@@ -1,6 +1,6 @@
 //go:build windows
 
-package telegram
+package bot
 
 import (
 	"errors"

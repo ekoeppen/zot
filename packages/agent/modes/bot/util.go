@@ -1,13 +1,13 @@
-package telegram
+package bot
 
 import (
 	"strings"
 	"unicode/utf8"
 )
 
-// chunkMessage splits s into chunks no larger than limit runes, on line
+// ChunkMessage splits s into chunks no larger than limit runes, on line
 // boundaries when possible.
-func chunkMessage(s string, limit int) []string {
+func ChunkMessage(s string, limit int) []string {
 	if limit <= 0 || utf8.RuneCountInString(s) <= limit {
 		return []string{s}
 	}
@@ -63,9 +63,9 @@ func byteIndexAfterRunes(s string, n int) int {
 	return len(s)
 }
 
-// isImageMIME returns true for MIME types the model can probably ingest
+// IsImageMIME returns true for MIME types the model can probably ingest
 // as a vision input.
-func isImageMIME(m string) bool {
+func IsImageMIME(m string) bool {
 	switch strings.ToLower(m) {
 	case "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp":
 		return true
@@ -73,10 +73,10 @@ func isImageMIME(m string) bool {
 	return false
 }
 
-// guessImageMIME infers a mime type from a filename suffix. Falls back
-// to image/png because telegram photos are always re-encoded to jpeg
+// GuessImageMIME infers a mime type from a filename suffix. Falls back
+// to image/jpeg because telegram photos are always re-encoded to jpeg
 // but getFile's file_path may omit the extension.
-func guessImageMIME(path string) string {
+func GuessImageMIME(path string) string {
 	lower := strings.ToLower(path)
 	switch {
 	case strings.HasSuffix(lower, ".png"):

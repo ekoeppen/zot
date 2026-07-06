@@ -178,7 +178,7 @@ func (a *Adapter) handleUpdate(ctx context.Context, u Update,
 			fmt.Fprintln(stderr(), "telegram: download photo:", err)
 		}
 	}
-	if msg.Document != nil && isImageMIME(msg.Document.MimeType) {
+	if msg.Document != nil && bot.IsImageMIME(msg.Document.MimeType) {
 		if data, mime, err := a.download(ctx, msg.Document.FileID, msg.Document.MimeType); err == nil {
 			images = append(images, provider.ImageBlock{MimeType: mime, Data: data})
 		}
@@ -202,7 +202,7 @@ func (a *Adapter) Send(ctx context.Context, channelID, text string, opts bot.Sen
 			replyTo = n
 		}
 	}
-	for _, chunk := range chunkMessage(text, 4000) {
+	for _, chunk := range bot.ChunkMessage(text, 4000) {
 		if err := a.Client.SendMessage(ctx, chatID, chunk, replyTo); err != nil {
 			return err
 		}
@@ -252,7 +252,7 @@ func (a *Adapter) download(ctx context.Context, fileID, mime string) ([]byte, st
 		return nil, "", err
 	}
 	if mime == "" {
-		mime = guessImageMIME(f.FilePath)
+		mime = bot.GuessImageMIME(f.FilePath)
 	}
 	return data, mime, nil
 }
