@@ -376,6 +376,18 @@ func ResolveCredentialFull(provider, explicit string) (cred, method, accountID s
 		if v := os.Getenv("GOOGLE_CLOUD_API_KEY"); v != "" {
 			return v, "apikey", "", nil
 		}
+		// Check for Application Default Credentials (gcloud auth application-default login)
+		// or service account JSON, matching the actual NewVertex client behavior.
+		if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "" {
+			return "<adc>", "apikey", "", nil
+		}
+		// Check for the default ADC path that gcloud writes to
+		if home, err := os.UserHomeDir(); err == nil {
+			adcPath := filepath.Join(home, ".config", "gcloud", "application_default_credentials.json")
+			if _, err := os.Stat(adcPath); err == nil {
+				return "<adc>", "apikey", "", nil
+			}
+		}
 	case "azure-openai-responses":
 		if v := os.Getenv("AZURE_OPENAI_API_KEY"); v != "" {
 			return v, "apikey", "", nil
