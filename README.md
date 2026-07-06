@@ -768,6 +768,12 @@ From then on, any DM you send is forwarded to the agent as a user prompt. Attach
 
 Bot mode respects the usual zot flags: `--provider`, `--model`, `--cwd`, `--reasoning`, `--continue`, `--no-session`, `--no-tools`, and so on. Run `zot tg run -c --model claude-opus-4-1` to resume the latest session on Opus, for example.
 
+### Architecture: protocol-agnostic bot core
+
+The messenger functionality is split in two layers. A generic, protocol-agnostic core lives in `packages/agent/modes/bot`: it owns the turn queue, agent prompting, built-in command dispatch (`/start`, `/help`, `/status`, `/stop`), status formatting, and per-turn credential refresh. Concrete transports implement the small `BotAdapter` interface (inbound polling, sending replies, a typing indicator, and optional protocol-specific status text); the Telegram support in `packages/agent/modes/telegram` is one such adapter.
+
+This means additional messaging backends (Discord, Slack, Signal, and similar) can be added by implementing `BotAdapter` in a new package and wiring up a subcommand. No changes to the runner, agent, or core are required. Channel IDs are opaque strings owned by the adapter, so the shared runner stays free of protocol-specific types.
+
 ## Development
 
 ```bash
@@ -790,6 +796,8 @@ packages/agent/                       cli wiring, arg parsing, system prompt, co
 packages/agent/extensions/            extension subprocess manager
 packages/agent/extproto/              extension wire-format types
 packages/agent/modes/                 interactive tui, print, json, dialogs
+packages/agent/modes/bot/             protocol-agnostic bot runner (BotAdapter interface)
+packages/agent/modes/telegram/        telegram adapter, api client, daemon
 packages/agent/tools/                 read, write, edit, bash, sandbox
 packages/agent/skills/                skill discovery, frontmatter parser, skill tool
 packages/agent/swarm/                 background subagent runtime
