@@ -112,6 +112,49 @@ func TestResolveExplicitFlagStaleDoesNotRepairConfig(t *testing.T) {
 	}
 }
 
+func TestResolveOpenRouterPreservesSavedRoutedModelID(t *testing.T) {
+	t.Setenv("ZOT_HOME", t.TempDir())
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
+	want := "deepseek/deepseek-v4-flash"
+	if err := SaveConfig(Config{Provider: "openrouter", Model: want}); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := Resolve(Args{}, true)
+	if err != nil {
+		t.Fatalf("Resolve failed: %v", err)
+	}
+	if r.Provider != "openrouter" {
+		t.Fatalf("provider = %q, want openrouter", r.Provider)
+	}
+	if r.Model != want {
+		t.Fatalf("model = %q, want %q", r.Model, want)
+	}
+	if r.MaxOutput != 64000 {
+		t.Fatalf("MaxOutput = %d, want synthetic gateway default 64000", r.MaxOutput)
+	}
+}
+
+func TestResolveGatewayPlainUnknownModelFallsBack(t *testing.T) {
+	t.Setenv("ZOT_HOME", t.TempDir())
+	t.Setenv("OPENROUTER_API_KEY", "test-key")
+	stale := "not-a-routed-model"
+	if err := SaveConfig(Config{Provider: "openrouter", Model: stale}); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := Resolve(Args{}, true)
+	if err != nil {
+		t.Fatalf("Resolve failed: %v", err)
+	}
+	if r.Provider != "openrouter" {
+		t.Fatalf("provider = %q, want openrouter", r.Provider)
+	}
+	if r.Model == stale || r.Model == "" {
+		t.Fatalf("model = %q, want repaired gateway default", r.Model)
+	}
+}
+
 // TestResolveEnvOnlyBedrockDiscoveredWithoutConfig reproduces issue
 // #15: pointing ZOT_HOME at a fresh dir drops the persisted
 // config.json (which pinned provider=amazon-bedrock). Resolve must

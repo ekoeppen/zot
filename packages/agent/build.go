@@ -348,12 +348,28 @@ func Resolve(args Args, requireCred bool) (Resolved, error) {
 		}
 	}
 
-	// If the user did NOT explicitly pick a provider and the default one
-	// has no credentials, auto-fall-back to whichever provider is actually
-	// logged in. That way running plain `zot` after `/login` (any provider)
-	// never shows a "not logged in" banner.
-	userPickedProvider := args.Provider != ""
+	// If the user did NOT explicitly pick a provider (neither via --provider
+	// nor by saving one in config.json) and the default one has no
+	// credentials, auto-fall-back to whichever provider is actually logged
+	// in. That way running plain `zot` after `/login` (any provider) never
+	// shows a "not logged in" banner.
+	//
+	// Critical: when the user HAS saved a provider in config.json (e.g.
+	// "deepseek" with "deepseek-v4-flash"), that choice is respected even
+	// if no credential is found — the tui will show the login dialog or
+	// surface a clear credential error rather than silently switching to
+	// a completely different provider and model.
+	// autoFellBack tracks whether the provider was changed by the
+	// auto-fallback loop (no explicit provider from CLI or config,
+	// and the default had no credentials). When false, the provider
+	// came from the user's explicit choice (--provider or config.json)
+	// and must be respected, including any model id that may belong
+	// to a different provider in the catalog — for example when using
+	// a gateway/router like OpenRouter with "deepseek/deepseek-v4-flash".
+	var autoFellBack bool
+	userPickedProvider := args.Provider != "" || cfg.Provider != ""
 	if credErr != nil && !userPickedProvider && provName != "ollama" {
+		autoFellBack = true
 		// Scan every known provider (not a hardcoded subset) so any
 		// env-based credential is discovered, e.g. an env-only
 		// amazon-bedrock setup (AWS_BEARER_TOKEN_BEDROCK / AWS_PROFILE /
@@ -381,8 +397,12 @@ func Resolve(args Args, requireCred bool) (Resolved, error) {
 		model = defaultModelForProvider(provName)
 	}
 	// If the resolved model belongs to a different provider (e.g. config
-	// says gpt-5 but we fell back to anthropic), pick that provider's default.
-	if provName != "ollama" {
+	// says gpt-5 but we auto-fell back to anthropic), pick that provider's
+	// default. This override only fires when the provider was auto-fallback-
+	// changed, NOT when the user explicitly configured the pair — gateway/
+	// router providers (openrouter, vercel-ai-gateway, etc.) can serve
+	// models from any provider in the catalog.
+	if autoFellBack && provName != "ollama" {
 		if m, err := provider.FindModel("", model); err == nil && m.Provider != provName {
 			model = defaultModelForProvider(provName)
 		}
@@ -416,7 +436,8 @@ func Resolve(args Args, requireCred bool) (Resolved, error) {
 			}
 			err = nil
 		}
-	} else if cfg, ok := provider.CustomProviders()[provName]; ok && resolvedModel.BaseURL == "" && cfg.BaseURL != "" {
+	}
+	if cfg, ok := provider.CustomProviders()[provName]; ok && err == nil && resolvedModel.BaseURL == "" && cfg.BaseURL != "" {
 		// Fall back to the provider-level base URL when the model does
 		// not define its own endpoint.
 		resolvedModel.BaseURL = cfg.BaseURL
@@ -431,29 +452,48 @@ func Resolve(args Args, requireCred bool) (Resolved, error) {
 		// when the stale id came from the persisted config (not an
 		// explicit --model flag), repair the config so the warning
 		// doesn't repeat on every launch.
-		fallback := defaultModelForProvider(provName)
-		fm, ferr := provider.FindModel(provName, fallback)
-		if ferr != nil {
-			// Even the provider default is gone (catastrophic
-			// catalogue trim). Last resort: any model on this
-			// provider, then the global DefaultModel.
-			if candidates := provider.ModelsForProvider(provName); len(candidates) > 0 {
-				fm = candidates[0]
-				ferr = nil
-			} else {
-				fm = provider.DefaultModel
-				ferr = nil
+
+		// Gateway providers can accept route-qualified ids that are not in
+		// zot's local catalog yet, for example OpenRouter's
+		// "deepseek/deepseek-v4-flash". Preserve only route-qualified ids;
+		// plain unknown values are likely typos and should still fall back.
+		if isGatewayProvider(provName) && isGatewayRoutedModelID(model) {
+			resolvedModel = provider.Model{
+				Provider:      provName,
+				ID:            model,
+				DisplayName:   model,
+				ContextWindow: 1000000,
+				MaxOutput:     64000,
+				BaseURL:       "",
+				Source:        "gateway",
 			}
+			err = nil
+			// Don't repair config — the routed model id may be valid upstream.
+		} else {
+			fallback := defaultModelForProvider(provName)
+			fm, ferr := provider.FindModel(provName, fallback)
+			if ferr != nil {
+				// Even the provider default is gone (catastrophic
+				// catalogue trim). Last resort: any model on this
+				// provider, then the global DefaultModel.
+				if candidates := provider.ModelsForProvider(provName); len(candidates) > 0 {
+					fm = candidates[0]
+					ferr = nil
+				} else {
+					fm = provider.DefaultModel
+					ferr = nil
+				}
+			}
+			fmt.Fprintf(os.Stderr,
+				"zot: model %q is not in the active catalogue; using %q instead. Pick a different model with --model or /model.\n",
+				model, fm.ID)
+			if args.Model == "" && cfg.Model == model {
+				cfg.Model = fm.ID
+				_ = SaveConfig(cfg)
+			}
+			resolvedModel = fm
+			model = fm.ID
 		}
-		fmt.Fprintf(os.Stderr,
-			"zot: model %q is not in the active catalogue; using %q instead. Pick a different model with --model or /model.\n",
-			model, fm.ID)
-		if args.Model == "" && cfg.Model == model {
-			cfg.Model = fm.ID
-			_ = SaveConfig(cfg)
-		}
-		resolvedModel = fm
-		model = fm.ID
 	}
 
 	explicitBaseURL := args.BaseURL != "" || (resolvedModel.Source == "user" && resolvedModel.BaseURL != "")
