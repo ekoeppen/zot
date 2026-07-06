@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/patriceckhart/zot/packages/agent/modes/bot"
 	"github.com/patriceckhart/zot/packages/provider"
 )
 
@@ -195,7 +196,7 @@ func (b *Bridge) sendToPaired(text, prefix string) {
 	if prefix != "" {
 		text = prefix + text
 	}
-	for _, chunk := range chunkMessage(text, 4000) {
+	for _, chunk := range bot.ChunkMessage(text, 4000) {
 		if err := b.Client.SendMessage(context.Background(), chatID, chunk, 0); err != nil {
 			fmt.Fprintln(stderr(), "telegram bridge: sendMessage:", err)
 			return
@@ -368,7 +369,7 @@ func (b *Bridge) handleUpdate(ctx context.Context, u Update) {
 			images = append(images, provider.ImageBlock{MimeType: mime, Data: data})
 		}
 	}
-	if msg.Document != nil && isImageMIME(msg.Document.MimeType) {
+	if msg.Document != nil && bot.IsImageMIME(msg.Document.MimeType) {
 		if data, mime, err := b.download(ctx, msg.Document.FileID, msg.Document.MimeType); err == nil {
 			images = append(images, provider.ImageBlock{MimeType: mime, Data: data})
 		}
@@ -397,7 +398,7 @@ func (b *Bridge) download(ctx context.Context, fileID, mimeOverride string) ([]b
 	}
 	mime := mimeOverride
 	if mime == "" {
-		mime = guessImageMIME(f.FilePath)
+		mime = bot.GuessImageMIME(f.FilePath)
 	}
 	return data, mime, nil
 }
