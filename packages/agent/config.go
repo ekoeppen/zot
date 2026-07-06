@@ -108,6 +108,9 @@ func ZotHome() string {
 	if v := os.Getenv("ZOT_HOME"); v != "" {
 		return v
 	}
+	if v := os.Getenv("XDG_STATE_HOME"); v != "" {
+		return filepath.Join(v, "zot")
+	}
 	switch runtime.GOOS {
 	case "darwin":
 		if home, err := os.UserHomeDir(); err == nil {
@@ -117,9 +120,6 @@ func ZotHome() string {
 		if v := os.Getenv("LOCALAPPDATA"); v != "" {
 			return filepath.Join(v, "zot")
 		}
-	}
-	if v := os.Getenv("XDG_STATE_HOME"); v != "" {
-		return filepath.Join(v, "zot")
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		return filepath.Join(home, ".local", "state", "zot")
