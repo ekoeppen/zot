@@ -311,7 +311,11 @@ func (t *vertexTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	newPath := fmt.Sprintf("/v1/projects/%s/locations/%s/publishers/google/models/%s%s",
 		t.cfg.project, t.cfg.location, modelID, verb)
 	clone := req.Clone(req.Context())
-	clone.URL.Host = t.cfg.location + "-aiplatform.googleapis.com"
+	if t.cfg.location == "global" {
+		clone.URL.Host = "aiplatform.googleapis.com"
+	} else {
+		clone.URL.Host = t.cfg.location + "-aiplatform.googleapis.com"
+	}
 	clone.URL.Path = newPath
 	// Drop existing auth header and pick the right one.
 	clone.Header.Del("x-goog-api-key")
@@ -336,9 +340,13 @@ func NewVertex(_ string, _ string) Client {
 	if err != nil {
 		return &unimplementedClient{name: "google-vertex", hint: err.Error()}
 	}
+	baseHost := "aiplatform.googleapis.com"
+	if cfg.location != "global" {
+		baseHost = cfg.location + "-aiplatform.googleapis.com"
+	}
 	inner := &geminiClient{
 		apiKey:  "vertex-placeholder", // overwritten by transport
-		baseURL: "https://" + cfg.location + "-aiplatform.googleapis.com",
+		baseURL: "https://" + baseHost,
 		http: &http.Client{
 			Transport: &vertexTransport{inner: http.DefaultTransport, cfg: cfg},
 			Timeout:   0,
