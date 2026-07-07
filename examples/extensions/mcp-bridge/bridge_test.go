@@ -12,6 +12,7 @@ import (
 
 func testBridge() *bridge {
 	return &bridge{
+		cwd:     "/project",
 		servers: map[string]*managedServer{},
 		mapping: map[string]toolMapping{},
 		logger:  log.New(io.Discard, "", 0),
@@ -30,12 +31,23 @@ func TestHandleToolCallStartFailureIsFriendlyError(t *testing.T) {
 	b := testBridge()
 	b.servers["bogus"] = newManagedServer("bogus",
 		ServerConfig{Transport: "no-such-transport", ConnectTimeout: 1, RequestTimeout: 1},
+		"/project",
 		log.New(io.Discard, "", 0))
 	b.mapping["mcp__bogus__t"] = toolMapping{serverName: "bogus", mcpTool: "t"}
 
 	res := b.handleToolCall("mcp__bogus__t", nil)
 	if !res.IsError {
 		t.Fatal("expected error result for failed server start")
+	}
+}
+
+func TestLoadServersPassesProjectCWD(t *testing.T) {
+	b := testBridge()
+	b.loadServers(Config{MCPServers: map[string]ServerConfig{
+		"fs": {Transport: "stdio", Command: "dummy"},
+	}})
+	if got := b.servers["fs"].cwd; got != "/project" {
+		t.Fatalf("managed server cwd = %q, want /project", got)
 	}
 }
 

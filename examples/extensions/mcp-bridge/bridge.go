@@ -33,6 +33,7 @@ type toolMapping struct {
 // bridge connects MCP servers to zot's extension protocol.
 type bridge struct {
 	e *ext.Extension
+	cwd string
 	// servers is written once in loadServers before any goroutine
 	// starts, and read-only afterwards — that invariant is what makes
 	// the lock-free reads in handleToolCall and the idle reaper safe.
@@ -45,9 +46,10 @@ type bridge struct {
 }
 
 // newBridge creates a new MCP→zot bridge.
-func newBridge(e *ext.Extension, logger *log.Logger) *bridge {
+func newBridge(e *ext.Extension, cwd string, logger *log.Logger) *bridge {
 	return &bridge{
 		e:       e,
+		cwd:     cwd,
 		servers: make(map[string]*managedServer),
 		mapping: make(map[string]toolMapping),
 		logger:  logger,
@@ -78,7 +80,7 @@ func toolName(serverName, mcpToolName string) string {
 // loadServers reads the config and creates managed servers.
 func (b *bridge) loadServers(cfg Config) {
 	for name, srvCfg := range cfg.MCPServers {
-		srv := newManagedServer(name, srvCfg, b.logger)
+		srv := newManagedServer(name, srvCfg, b.cwd, b.logger)
 		b.servers[name] = srv
 	}
 }

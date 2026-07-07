@@ -76,7 +76,7 @@ func main() {
 
 		logger.Printf("found %d MCP server(s)", len(cfg.MCPServers))
 
-		b = newBridge(e, logger)
+		b = newBridge(e, cwd, logger)
 		b.loadServers(cfg)
 
 		cachePath := toolCachePath()

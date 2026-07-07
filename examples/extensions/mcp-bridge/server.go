@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -54,6 +56,7 @@ func (s serverState) String() string {
 type managedServer struct {
 	name   string
 	config ServerConfig
+	cwd    string
 	logger *log.Logger
 
 	mu       sync.Mutex
@@ -66,10 +69,11 @@ type managedServer struct {
 }
 
 // newManagedServer creates a new server wrapper.
-func newManagedServer(name string, cfg ServerConfig, logger *log.Logger) *managedServer {
+func newManagedServer(name string, cfg ServerConfig, cwd string, logger *log.Logger) *managedServer {
 	return &managedServer{
 		name:     name,
 		config:   cfg,
+		cwd:      cwd,
 		logger:   logger,
 		state:    stateStopped,
 		lastUsed: time.Now(),
@@ -186,8 +190,25 @@ func (s *managedServer) startStdio() (*client.Client, error) {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Create stdio client (this spawns the subprocess)
-	c, err := client.NewStdioMCPClient(s.config.Command, env, s.config.Args...)
+	// Create stdio client (this spawns the subprocess). Run stdio MCP
+	// servers from the zot session's project directory, not the installed
+	// extension directory. Many MCP servers use their process cwd as their
+	// project root when answering relative-path or directory-listing
+	// requests, so inheriting mcp-bridge's cwd makes them operate on the
+	// extension install instead of the user's project.
+	c, err := client.NewStdioMCPClientWithOptions(
+		s.config.Command,
+		env,
+		s.config.Args,
+		transport.WithCommandFunc(func(ctx context.Context, command string, env []string, args []string) (*exec.Cmd, error) {
+			cmd := exec.CommandContext(ctx, command, args...)
+			cmd.Env = append(os.Environ(), env...)
+			if s.cwd != "" {
+				cmd.Dir = s.cwd
+			}
+			return cmd, nil
+		}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("spawn %s: %w", s.config.Command, err)
 	}
