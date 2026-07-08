@@ -16,7 +16,7 @@ import (
 )
 
 func TestManagedServerStatusCompact(t *testing.T) {
-	s := newManagedServer("grep", ServerConfig{}, log.New(io.Discard, "", 0))
+	s := newManagedServer("grep", ServerConfig{}, "", log.New(io.Discard, "", 0))
 
 	s.state = stateReady
 	s.tools = []mcp.Tool{{Name: "searchGitHub"}}
@@ -38,10 +38,10 @@ func TestManagedServerStatusCompact(t *testing.T) {
 
 func TestFormatStatusSummaryCompact(t *testing.T) {
 	b := &bridge{servers: map[string]*managedServer{}}
-	b.servers["grep"] = newManagedServer("grep", ServerConfig{}, log.New(io.Discard, "", 0))
+	b.servers["grep"] = newManagedServer("grep", ServerConfig{}, "", log.New(io.Discard, "", 0))
 	b.servers["grep"].state = stateReady
 	b.servers["grep"].tools = []mcp.Tool{{Name: "searchGitHub"}}
-	b.servers["n8n-mcp"] = newManagedServer("n8n-mcp", ServerConfig{}, log.New(io.Discard, "", 0))
+	b.servers["n8n-mcp"] = newManagedServer("n8n-mcp", ServerConfig{}, "", log.New(io.Discard, "", 0))
 	b.servers["n8n-mcp"].state = stateReady
 	b.servers["n8n-mcp"].tools = make([]mcp.Tool, 26)
 
@@ -54,7 +54,7 @@ func TestFormatStatusSummaryCompact(t *testing.T) {
 }
 
 func TestManagedServerStopBeforeStartDoesNotPanic(t *testing.T) {
-	s := newManagedServer("never-started", ServerConfig{}, log.New(io.Discard, "", 0))
+	s := newManagedServer("never-started", ServerConfig{}, "", log.New(io.Discard, "", 0))
 	s.stop()
 	if got, want := s.state, stateStopped; got != want {
 		t.Fatalf("state = %s, want %s", got, want)
@@ -98,10 +98,10 @@ func TestCompactErrShortensConnectionFailures(t *testing.T) {
 
 func TestNotifyLevelWarnOnPartialFailure(t *testing.T) {
 	b := &bridge{servers: map[string]*managedServer{}}
-	b.servers["grep"] = newManagedServer("grep", ServerConfig{}, log.New(io.Discard, "", 0))
+	b.servers["grep"] = newManagedServer("grep", ServerConfig{}, "", log.New(io.Discard, "", 0))
 	b.servers["grep"].state = stateReady
 	b.servers["grep"].tools = []mcp.Tool{{Name: "searchGitHub"}}
-	b.servers["broken"] = newManagedServer("broken", ServerConfig{}, log.New(io.Discard, "", 0))
+	b.servers["broken"] = newManagedServer("broken", ServerConfig{}, "", log.New(io.Discard, "", 0))
 	b.servers["broken"].state = stateError
 	b.servers["broken"].startErr = errors.New("authorization required\nmore detail")
 
@@ -114,7 +114,7 @@ func TestNotifyLevelWarnOnPartialFailure(t *testing.T) {
 }
 
 func TestStopDuringStartDiscardsStaleResult(t *testing.T) {
-	s := newManagedServer("racy", ServerConfig{}, log.New(io.Discard, "", 0))
+	s := newManagedServer("racy", ServerConfig{}, "", log.New(io.Discard, "", 0))
 
 	// Simulate the window inside start(): state is starting, gen recorded.
 	s.mu.Lock()
@@ -142,7 +142,7 @@ func TestStopDuringStartDiscardsStaleResult(t *testing.T) {
 }
 
 func TestCallToolNilClientReturnsErrorNotPanic(t *testing.T) {
-	s := newManagedServer("bogus", ServerConfig{Transport: "no-such-transport", RequestTimeout: 1, ConnectTimeout: 1}, log.New(io.Discard, "", 0))
+	s := newManagedServer("bogus", ServerConfig{Transport: "no-such-transport", RequestTimeout: 1, ConnectTimeout: 1}, "", log.New(io.Discard, "", 0))
 	_, err := s.callTool(context.Background(), "anything", nil)
 	if err == nil {
 		t.Fatal("expected error from unknown transport")
@@ -151,7 +151,7 @@ func TestCallToolNilClientReturnsErrorNotPanic(t *testing.T) {
 
 func TestPipeStderrKeepsLinesIntactAcrossChunks(t *testing.T) {
 	var buf bytes.Buffer
-	s := newManagedServer("srv", ServerConfig{}, log.New(&buf, "", 0))
+	s := newManagedServer("srv", ServerConfig{}, "", log.New(&buf, "", 0))
 
 	// iotest.OneByteReader forces 1-byte reads: the old 4096-byte
 	// chunking code would log every byte as its own "line".
