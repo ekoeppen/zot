@@ -32,7 +32,7 @@ type toolMapping struct {
 
 // bridge connects MCP servers to zot's extension protocol.
 type bridge struct {
-	e *ext.Extension
+	e   *ext.Extension
 	cwd string
 	// servers is written once in loadServers before any goroutine
 	// starts, and read-only afterwards — that invariant is what makes
