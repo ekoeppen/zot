@@ -48,7 +48,7 @@ func (t *EditTool) Execute(ctx context.Context, raw json.RawMessage, progress fu
 		return core.ToolResult{}, fmt.Errorf("at least one edit is required")
 	}
 	path := resolvePath(t.CWD, a.Path)
-	if err := t.Sandbox.CheckPath(path); err != nil {
+	if err := t.Sandbox.CheckWritePath(path); err != nil {
 		return core.ToolResult{}, err
 	}
 
