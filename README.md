@@ -18,8 +18,8 @@ Yet another coding agent harness, lightweight and written (vibe-slopped) in go.
 - built-in telegram bot.
 - extensions in any language via subprocess + json-rpc. None installed by default; opt in with `zot ext install` or `zot --ext`. See [docs/extensions.md](docs/extensions.md).
 - user and extension themes via JSON; see [docs/themes.md](docs/themes.md).
+- standing instructions via `AGENTS.md` files (global and per-project); see [Persistent instructions](#persistent-instructions-agentsmd).
 - reusable instructions via `SKILL.md` files; see [docs/skills.md](docs/skills.md).
-- no community atm.
 
 ## Install
 
@@ -107,6 +107,7 @@ $ZOT_HOME/
 ├── auth.json           # api keys and oauth tokens (mode 0600)
 ├── sessions/           # jsonl transcripts, one dir per cwd
 ├── models-cache.json   # live /v1/models discovery cache (6h ttl)
+├── AGENTS.md           # optional: global instructions appended to the prompt
 ├── SYSTEM.md           # optional: replaces the default system prompt
 ├── skills/             # optional: user SKILL.md files
 ├── themes/             # optional: user theme JSON files
@@ -115,6 +116,35 @@ $ZOT_HOME/
 ```
 
 Drop a `SYSTEM.md` in `$ZOT_HOME` to replace the built-in identity and guidelines for every run. `--system-prompt` still wins per-invocation. Delete the file to revert to the default.
+
+## Persistent instructions (AGENTS.md)
+
+Use `AGENTS.md` to give zot standing instructions that layer **on top of** the default system prompt, without replacing it. This is the friendliest way to shape behavior (for example, taming local models that jump straight to code edits) because it adds guidance rather than taking over the base identity the way `SYSTEM.md` does.
+
+zot discovers `AGENTS.md` files automatically at startup and loads them in this order:
+
+1. `$ZOT_HOME/AGENTS.md` (global, machine-wide instructions that apply to every project).
+2. Every `AGENTS.md` from the top-most parent directory down to the current working directory. More specific (deeper) files may override earlier ones.
+
+All discovered files are appended to the prompt in that order, so a global baseline can be refined per project.
+
+For a general, non-project-specific instruction set, put your rules in `$ZOT_HOME/AGENTS.md`, for example:
+
+```markdown
+Treat questions and discussions as requests for explanation. Do not edit files or run tools unless explicitly asked to make a change. Ask before modifying code.
+```
+
+`AGENTS.md` vs the other mechanisms:
+
+| Mechanism | Scope | Effect |
+|---|---|---|
+| `$ZOT_HOME/AGENTS.md` | global, every run | appended to the default prompt |
+| `./AGENTS.md` (and parent dirs) | project | appended to the default prompt |
+| `$ZOT_HOME/SYSTEM.md` | global, every run | replaces the default prompt entirely |
+| `--append-system-prompt <text>` | single run | appends for one invocation (repeatable) |
+| `--system-prompt <text>` | single run | replaces the prompt for one invocation |
+
+> **Note:** zot does not read a `CLAUDE.md` instruction file. The only Claude-compatible thing it picks up is skills under `.claude/skills/`. If you are migrating from Claude Code, move that content into `AGENTS.md` (global or per-project) and zot will use it.
 
 ## Changelog on update
 
