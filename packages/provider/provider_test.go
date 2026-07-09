@@ -393,8 +393,7 @@ func TestGPT56CatalogEntries(t *testing.T) {
 		priceOut   float64
 		cacheRead  float64
 	}{
-		{"openai", "gpt-5.6-sol", 5, 30, 0.5},
-		{"openai", "gpt-5.6-terra", 2.5, 15, 0.25},
+		{"openai-codex", "gpt-5.6-luna", 1, 6, 0.1},
 		{"openai-codex", "gpt-5.6-sol", 5, 30, 0.5},
 		{"openai-codex", "gpt-5.6-terra", 2.5, 15, 0.25},
 	}

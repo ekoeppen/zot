@@ -3,7 +3,9 @@ package provider
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -146,6 +148,7 @@ type codexRequest struct {
 	ParallelToolCalls bool                  `json:"parallel_tool_calls"`
 	Include           []string              `json:"include,omitempty"`
 	Reasoning         *codexReasoningConfig `json:"reasoning,omitempty"`
+	PromptCacheKey    string                `json:"prompt_cache_key,omitempty"`
 }
 
 // ---- Request building ----
@@ -310,12 +313,40 @@ func splitCallID(id string) (string, string) {
 	return id, ""
 }
 
+func usesCodexCLIRouting(model string) bool {
+	switch model {
+	case "gpt-5.6-luna", "gpt-5.6-luna-pro", "gpt-5.6-terra", "gpt-5.6-terra-pro":
+		return true
+	default:
+		return false
+	}
+}
+
+func newCodexSessionID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("zot-%d", time.Now().UnixNano())
+	}
+	return strings.Join([]string{
+		hex.EncodeToString(b[0:4]),
+		hex.EncodeToString(b[4:6]),
+		hex.EncodeToString(b[6:8]),
+		hex.EncodeToString(b[8:10]),
+		hex.EncodeToString(b[10:16]),
+	}, "-")
+}
+
 // ---- Streaming ----
 
 func (c *codexClient) Stream(ctx context.Context, req Request) (<-chan Event, error) {
 	wire, err := c.buildRequest(req)
 	if err != nil {
 		return nil, err
+	}
+	var codexCLISessionID string
+	if usesCodexCLIRouting(wire.Model) {
+		codexCLISessionID = newCodexSessionID()
+		wire.PromptCacheKey = codexCLISessionID
 	}
 	body, err := json.Marshal(wire)
 	if err != nil {
@@ -332,8 +363,17 @@ func (c *codexClient) Stream(ctx context.Context, req Request) (<-chan Event, er
 		httpReq.Header.Set("authorization", "Bearer "+c.token)
 		httpReq.Header.Set("chatgpt-account-id", c.accountID)
 		httpReq.Header.Set("openai-beta", "responses=experimental")
-		httpReq.Header.Set("originator", "zot")
-		httpReq.Header.Set("user-agent", fmt.Sprintf("zot (%s %s)", runtime.GOOS, runtime.GOARCH))
+		if codexCLISessionID != "" {
+			// Some preview models are only admitted or reliably served by the
+			// ChatGPT Codex backend when the request follows Codex CLI routing
+			// metadata. Keep this narrow so Sol retains zot's proven shape.
+			httpReq.Header.Set("originator", "codex_cli_rs")
+			httpReq.Header.Set("session-id", codexCLISessionID)
+			httpReq.Header.Set("user-agent", "codex_cli_rs/0.0.0")
+		} else {
+			httpReq.Header.Set("originator", "zot")
+			httpReq.Header.Set("user-agent", fmt.Sprintf("zot (%s %s)", runtime.GOOS, runtime.GOARCH))
+		}
 		return httpReq, nil
 	}
 
