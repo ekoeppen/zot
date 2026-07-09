@@ -316,6 +316,18 @@ var Catalog = []Model{
 		PriceInput: 5, PriceOutput: 30, PriceCacheRead: 0.5,
 		Speculative: true,
 	},
+	{
+		Provider: "openai", ID: "gpt-5.6-sol", DisplayName: "GPT-5.6 Sol",
+		ContextWindow: 1050000, MaxOutput: 128000, Reasoning: true,
+		PriceInput: 5, PriceOutput: 30, PriceCacheRead: 0.5,
+		Speculative: true,
+	},
+	{
+		Provider: "openai", ID: "gpt-5.6-terra", DisplayName: "GPT-5.6 Terra",
+		ContextWindow: 1050000, MaxOutput: 128000, Reasoning: true,
+		PriceInput: 2.5, PriceOutput: 15, PriceCacheRead: 0.25,
+		Speculative: true,
+	},
 
 	// ---- OpenAI Codex / ChatGPT subscription backend ----
 	// Same model ids as the OpenAI family, but routed through the
@@ -342,6 +354,18 @@ var Catalog = []Model{
 		Provider: "openai-codex", ID: "gpt-5.5", DisplayName: "GPT-5.5",
 		ContextWindow: 272000, MaxOutput: 128000, Reasoning: true,
 		PriceInput: 5, PriceOutput: 30, PriceCacheRead: 0.5,
+		Speculative: true,
+	},
+	{
+		Provider: "openai-codex", ID: "gpt-5.6-sol", DisplayName: "GPT-5.6 Sol",
+		ContextWindow: 1050000, MaxOutput: 128000, Reasoning: true,
+		PriceInput: 5, PriceOutput: 30, PriceCacheRead: 0.5,
+		Speculative: true,
+	},
+	{
+		Provider: "openai-codex", ID: "gpt-5.6-terra", DisplayName: "GPT-5.6 Terra",
+		ContextWindow: 1050000, MaxOutput: 128000, Reasoning: true,
+		PriceInput: 2.5, PriceOutput: 15, PriceCacheRead: 0.25,
 		Speculative: true,
 	},
 }

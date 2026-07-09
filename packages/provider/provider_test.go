@@ -385,6 +385,33 @@ func TestDiscoverOpenRouter(t *testing.T) {
 	}
 }
 
+func TestGPT56CatalogEntries(t *testing.T) {
+	cases := []struct {
+		provider   string
+		id         string
+		priceInput float64
+		priceOut   float64
+		cacheRead  float64
+	}{
+		{"openai", "gpt-5.6-sol", 5, 30, 0.5},
+		{"openai", "gpt-5.6-terra", 2.5, 15, 0.25},
+		{"openai-codex", "gpt-5.6-sol", 5, 30, 0.5},
+		{"openai-codex", "gpt-5.6-terra", 2.5, 15, 0.25},
+	}
+	for _, tc := range cases {
+		m, err := FindModel(tc.provider, tc.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.ContextWindow != 1050000 || m.MaxOutput != 128000 || !m.Reasoning {
+			t.Fatalf("%s/%s limits: %+v", tc.provider, tc.id, m)
+		}
+		if m.PriceInput != tc.priceInput || m.PriceOutput != tc.priceOut || m.PriceCacheRead != tc.cacheRead {
+			t.Fatalf("%s/%s prices: %+v", tc.provider, tc.id, m)
+		}
+	}
+}
+
 // TestOpenAIOmitsZeroMaxTokens guards against sending max_tokens: 0 for
 // discovered models that don't advertise an output cap (MaxOutput == 0).
 func TestOpenAIOmitsZeroMaxTokens(t *testing.T) {
