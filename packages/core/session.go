@@ -59,6 +59,9 @@ type SessionMeta struct {
 	// are copied from the parent verbatim; the user's next turn on
 	// the child session continues from there.
 	ForkPoint int `json:"fork_point,omitempty"`
+	// HideFromSessions hides internal tree-navigation branches from the
+	// flat /sessions picker while keeping them available to /session tree.
+	HideFromSessions bool `json:"hide_from_sessions,omitempty"`
 }
 
 // sessionLine is the on-disk row type. Message is kept as a raw
@@ -389,6 +392,7 @@ type SessionSummary struct {
 	FirstUserText string
 	TotalCost     float64
 	Title         string
+	BranchDepth   int
 }
 
 // RenameSession updates the title field in the session's meta line.
@@ -409,16 +413,57 @@ func RenameSession(path, title string) error {
 	return err
 }
 
+// DeleteSession removes a session file. It refuses an empty path so
+// callers do not accidentally delete their cwd or another implicit target.
+func DeleteSession(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("session path is empty")
+	}
+	return os.Remove(path)
+}
+
 // DescribeSessions returns lightweight summaries for every session in
 // cwd, newest first. Parses only the first few lines and the last usage
 // line so it's cheap to run on every dialog open.
 func DescribeSessions(root, cwd string) []SessionSummary {
 	paths := ListSessions(root, cwd)
 	summaries := make([]SessionSummary, 0, len(paths))
+	metas := make(map[string]SessionMeta, len(paths))
+	idToPath := make(map[string]string, len(paths))
 	for _, p := range paths {
+		if meta, err := readSessionMeta(p); err == nil && meta.ID != "" {
+			metas[p] = meta
+			idToPath[meta.ID] = p
+		}
+	}
+	for _, p := range paths {
+		if meta := metas[p]; meta.HideFromSessions {
+			continue
+		}
 		summaries = append(summaries, describeSession(p))
 	}
+	for idx := range summaries {
+		summaries[idx].BranchDepth = sessionBranchDepth(summaries[idx].Path, metas, idToPath)
+	}
 	return summaries
+}
+
+func sessionBranchDepth(path string, metas map[string]SessionMeta, idToPath map[string]string) int {
+	depth := 0
+	seen := map[string]bool{}
+	for {
+		meta, ok := metas[path]
+		if !ok || meta.Parent == "" || seen[meta.ID] {
+			return depth
+		}
+		seen[meta.ID] = true
+		parentPath := idToPath[meta.Parent]
+		if parentPath == "" {
+			return depth
+		}
+		depth++
+		path = parentPath
+	}
 }
 
 func describeSession(path string) SessionSummary {
@@ -428,6 +473,12 @@ func describeSession(path string) SessionSummary {
 		return s
 	}
 	defer f.Close()
+	isBranch := false
+	forkPoint := 0
+	messageIdx := 0
+	branchPrompt := ""
+	lastUser := ""
+	renameMessageIdx := -1
 	_ = forEachJSONLLine(f, func(line []byte) error {
 		var head sessionLineHead
 		if err := json.Unmarshal(line, &head); err != nil {
@@ -443,18 +494,28 @@ func describeSession(path string) SessionSummary {
 				s.Model = row.Meta.Model
 				s.Provider = row.Meta.Provider
 				s.Title = row.Meta.Title
+				isBranch = row.Meta.Parent != ""
+				forkPoint = row.Meta.ForkPoint
 			}
 		case "message":
-			s.MessageCount++
-			if s.FirstUserText == "" {
-				s.FirstUserText = firstUserText(line)
+			if text := firstUserText(line); text != "" {
+				lastUser = text
+				if s.FirstUserText == "" {
+					s.FirstUserText = text
+				}
+				if isBranch && messageIdx >= forkPoint && branchPrompt == "" {
+					branchPrompt = text
+				}
 			}
+			messageIdx++
+			s.MessageCount++
 		case "compaction":
 			if compacted, err := hydrateCompaction(line); err == nil {
 				s.MessageCount = len(compacted)
-				if s.FirstUserText == "" && len(compacted) > 0 {
-					s.FirstUserText = firstTextFromMessage(compacted[0])
-				}
+				messageIdx = len(compacted)
+				s.FirstUserText = firstUserTextFromMessages(compacted)
+				lastUser = lastUserText(compacted)
+				branchPrompt = firstUserTextFromMessagesAfter(compacted, forkPoint)
 			}
 		case "rename":
 			var row struct {
@@ -462,6 +523,7 @@ func describeSession(path string) SessionSummary {
 			}
 			if err := json.Unmarshal(line, &row); err == nil && row.Title != "" {
 				s.Title = row.Title
+				renameMessageIdx = messageIdx
 			}
 		case "usage":
 			var row struct {
@@ -473,6 +535,18 @@ func describeSession(path string) SessionSummary {
 		}
 		return nil
 	})
+	if isBranch {
+		// A rename written after the branch has diverged is user intent
+		// and must win. Older generated branch titles were written at
+		// fork creation time, before any post-fork prompt, so those are
+		// allowed to be replaced by the branch prompt fallback.
+		userRenamedAfterFork := renameMessageIdx > forkPoint
+		if !userRenamedAfterFork && branchPrompt != "" {
+			s.Title = branchPrompt
+		} else if s.Title == "" && lastUser != "" {
+			s.Title = lastUser
+		}
+	}
 	return s
 }
 
@@ -494,6 +568,25 @@ func firstUserText(line []byte) string {
 	for _, c := range row.Message.Content {
 		if c.Text != "" {
 			return c.Text
+		}
+	}
+	return ""
+}
+
+func firstUserTextFromMessages(msgs []provider.Message) string {
+	return firstUserTextFromMessagesAfter(msgs, 0)
+}
+
+func firstUserTextFromMessagesAfter(msgs []provider.Message, start int) string {
+	if start < 0 {
+		start = 0
+	}
+	for idx, msg := range msgs {
+		if idx < start || msg.Role != provider.RoleUser {
+			continue
+		}
+		if text := firstTextFromMessage(msg); text != "" {
+			return text
 		}
 	}
 	return ""

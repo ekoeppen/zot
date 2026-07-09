@@ -256,6 +256,16 @@ func ImportSession(srcPath, root, cwd, version string) (string, error) {
 //
 // Returns the path of the new session file, ready for OpenSession.
 func BranchSession(parentPath, root, cwd, version string, upToMessageIdx int) (string, error) {
+	return branchSession(parentPath, root, cwd, version, upToMessageIdx, false)
+}
+
+// BranchSessionHidden creates a branch that participates in /session tree but
+// is hidden from the flat /sessions picker. Used for in-place tree navigation.
+func BranchSessionHidden(parentPath, root, cwd, version string, upToMessageIdx int) (string, error) {
+	return branchSession(parentPath, root, cwd, version, upToMessageIdx, true)
+}
+
+func branchSession(parentPath, root, cwd, version string, upToMessageIdx int, hideFromSessions bool) (string, error) {
 	if parentPath == "" {
 		return "", errors.New("branch: parent path is empty")
 	}
@@ -302,14 +312,15 @@ func BranchSession(parentPath, root, cwd, version string, upToMessageIdx int) (s
 
 	// Write the branch meta.
 	branchMeta := SessionMeta{
-		ID:        newID,
-		CWD:       cwd,
-		Model:     parentMeta.Model,
-		Provider:  parentMeta.Provider,
-		Started:   time.Now().UTC(),
-		Version:   version,
-		Parent:    parentMeta.ID,
-		ForkPoint: upToMessageIdx,
+		ID:               newID,
+		CWD:              cwd,
+		Model:            parentMeta.Model,
+		Provider:         parentMeta.Provider,
+		Started:          time.Now().UTC(),
+		Version:          version,
+		Parent:           parentMeta.ID,
+		ForkPoint:        upToMessageIdx,
+		HideFromSessions: hideFromSessions,
 	}
 	metaLine, err := json.Marshal(sessionLine{Type: "meta", Meta: &branchMeta})
 	if err != nil {
@@ -364,11 +375,12 @@ func BranchSession(parentPath, root, cwd, version string, upToMessageIdx int) (s
 	}); err != nil && err != io.EOF {
 		return "", fmt.Errorf("branch: read parent: %w", err)
 	}
+	limit := upToMessageIdx
+	if limit > len(effective) {
+		limit = len(effective)
+	}
+	branchTitle := lastUserText(effective[:limit])
 	if sawCompaction {
-		limit := upToMessageIdx
-		if limit > len(effective) {
-			limit = len(effective)
-		}
 		for i := 0; i < limit; i++ {
 			msg := effective[i]
 			line, err := json.Marshal(sessionLine{Type: "message", Message: &msg})
@@ -392,10 +404,31 @@ func BranchSession(parentPath, root, cwd, version string, upToMessageIdx int) (s
 			}
 		}
 	}
+	if branchTitle != "" {
+		line, _ := json.Marshal(map[string]string{"type": "rename", "title": branchTitle})
+		if _, err := bw.Write(line); err != nil {
+			return "", err
+		}
+		if err := bw.WriteByte('\n'); err != nil {
+			return "", err
+		}
+	}
 	if err := bw.Flush(); err != nil {
 		return "", err
 	}
 	return outPath, nil
+}
+
+func lastUserText(msgs []provider.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != provider.RoleUser {
+			continue
+		}
+		if text := strings.TrimSpace(firstTextFromMessage(msgs[i])); text != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 // TreeNode is one entry in the branch tree returned by

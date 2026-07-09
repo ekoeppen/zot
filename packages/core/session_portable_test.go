@@ -229,6 +229,93 @@ func TestBranchSessionCopiesPrefix(t *testing.T) {
 	if branch.Meta.ID == parent.Meta.ID {
 		t.Errorf("branch kept parent id; must rotate")
 	}
+	if branch.Meta.Title != "" {
+		t.Errorf("meta title should remain append-only, got %q", branch.Meta.Title)
+	}
+	if summary := describeSession(branchPath); summary.Title != "first" {
+		t.Errorf("branch title: want %q, got %q", "first", summary.Title)
+	}
+}
+
+func TestBranchSessionTitleUsesSelectedUserPrompt(t *testing.T) {
+	root := t.TempDir()
+	cwd := "/project"
+	parent, err := NewSession(root, cwd, "anthropic", "claude-opus-4-7", "0.0.0-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, msg := range []provider.Message{
+		{Role: provider.RoleUser, Content: []provider.Content{provider.TextBlock{Text: "first prompt"}}},
+		{Role: provider.RoleAssistant, Content: []provider.Content{provider.TextBlock{Text: "first reply"}}},
+		{Role: provider.RoleUser, Content: []provider.Content{provider.TextBlock{Text: "second prompt"}}},
+	} {
+		_ = parent.AppendMessage(msg)
+	}
+	_ = parent.Close()
+
+	branchPath, err := BranchSession(parent.Path, root, cwd, "0.0.0-test", 3)
+	if err != nil {
+		t.Fatalf("BranchSession: %v", err)
+	}
+	if summary := describeSession(branchPath); summary.Title != "second prompt" {
+		t.Errorf("branch title: want %q, got %q", "second prompt", summary.Title)
+	}
+}
+
+func TestBranchSessionTitleUsesFirstPromptAfterForkWhenBranchDiverges(t *testing.T) {
+	root := t.TempDir()
+	cwd := "/project"
+	parent, err := NewSession(root, cwd, "anthropic", "claude-opus-4-7", "0.0.0-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = parent.AppendMessage(provider.Message{Role: provider.RoleUser, Content: []provider.Content{provider.TextBlock{Text: "hello"}}})
+	_ = parent.Close()
+
+	branchPath, err := BranchSession(parent.Path, root, cwd, "0.0.0-test", 1)
+	if err != nil {
+		t.Fatalf("BranchSession: %v", err)
+	}
+	branch, _, err := OpenSession(branchPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = branch.AppendMessage(provider.Message{Role: provider.RoleUser, Content: []provider.Content{provider.TextBlock{Text: "how are you?"}}})
+	_ = branch.AppendMessage(provider.Message{Role: provider.RoleAssistant, Content: []provider.Content{provider.TextBlock{Text: "fine"}}})
+	_ = branch.Close()
+
+	if summary := describeSession(branchPath); summary.Title != "how are you?" {
+		t.Errorf("branch title: want %q, got %q", "how are you?", summary.Title)
+	}
+}
+
+func TestRenamedBranchKeepsExplicitTitle(t *testing.T) {
+	root := t.TempDir()
+	cwd := "/project"
+	parent, err := NewSession(root, cwd, "anthropic", "claude-opus-4-7", "0.0.0-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = parent.AppendMessage(provider.Message{Role: provider.RoleUser, Content: []provider.Content{provider.TextBlock{Text: "hello"}}})
+	_ = parent.Close()
+
+	branchPath, err := BranchSession(parent.Path, root, cwd, "0.0.0-test", 1)
+	if err != nil {
+		t.Fatalf("BranchSession: %v", err)
+	}
+	branch, _, err := OpenSession(branchPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = branch.AppendMessage(provider.Message{Role: provider.RoleUser, Content: []provider.Content{provider.TextBlock{Text: "how are you?"}}})
+	_ = branch.Close()
+	if err := RenameSession(branchPath, "friendly branch name"); err != nil {
+		t.Fatal(err)
+	}
+
+	if summary := describeSession(branchPath); summary.Title != "friendly branch name" {
+		t.Errorf("branch title: want %q, got %q", "friendly branch name", summary.Title)
+	}
 }
 
 func TestBranchSessionUsesEffectiveTranscriptAfterCompaction(t *testing.T) {
