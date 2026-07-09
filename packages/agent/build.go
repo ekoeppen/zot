@@ -748,6 +748,9 @@ func (r Resolved) NewClient() provider.Client {
 	case "deepseek":
 		return wrap(provider.NewDeepSeek(r.Credential, r.BaseURL))
 	case "openai":
+		if strings.HasPrefix(r.Model, "gpt-5.6-") {
+			return wrap(provider.NewOpenAIResponsesNamed(r.Credential, r.BaseURL, "openai"))
+		}
 		return wrap(provider.NewOpenAI(r.Credential, r.BaseURL))
 	case "openai-codex":
 		inner := wrap(provider.NewOpenAICodex(r.Credential, r.AccountID, r.BaseURL))
