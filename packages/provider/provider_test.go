@@ -389,26 +389,28 @@ func TestGPT56CatalogEntries(t *testing.T) {
 	cases := []struct {
 		provider   string
 		id         string
+		context    int
 		priceInput float64
 		priceOut   float64
 		cacheRead  float64
+		cacheWrite float64
 	}{
-		{"openai", "gpt-5.6-luna", 1, 6, 0.1},
-		{"openai", "gpt-5.6-sol", 5, 30, 0.5},
-		{"openai", "gpt-5.6-terra", 2.5, 15, 0.25},
-		{"openai-codex", "gpt-5.6-luna", 1, 6, 0.1},
-		{"openai-codex", "gpt-5.6-sol", 5, 30, 0.5},
-		{"openai-codex", "gpt-5.6-terra", 2.5, 15, 0.25},
+		{"openai", "gpt-5.6-luna", 272000, 1, 6, 0.1, 1.25},
+		{"openai", "gpt-5.6-sol", 272000, 5, 30, 0.5, 6.25},
+		{"openai", "gpt-5.6-terra", 272000, 2.5, 15, 0.25, 3.125},
+		{"openai-codex", "gpt-5.6-luna", 372000, 1, 6, 0.1, 1.25},
+		{"openai-codex", "gpt-5.6-sol", 372000, 5, 30, 0.5, 6.25},
+		{"openai-codex", "gpt-5.6-terra", 372000, 2.5, 15, 0.25, 3.125},
 	}
 	for _, tc := range cases {
 		m, err := FindModel(tc.provider, tc.id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if m.ContextWindow != 1050000 || m.MaxOutput != 128000 || !m.Reasoning {
+		if m.ContextWindow != tc.context || m.MaxOutput != 128000 || !m.Reasoning {
 			t.Fatalf("%s/%s limits: %+v", tc.provider, tc.id, m)
 		}
-		if m.PriceInput != tc.priceInput || m.PriceOutput != tc.priceOut || m.PriceCacheRead != tc.cacheRead {
+		if m.PriceInput != tc.priceInput || m.PriceOutput != tc.priceOut || m.PriceCacheRead != tc.cacheRead || m.PriceCacheWrite != tc.cacheWrite {
 			t.Fatalf("%s/%s prices: %+v", tc.provider, tc.id, m)
 		}
 	}

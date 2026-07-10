@@ -318,20 +318,20 @@ var Catalog = []Model{
 	},
 	{
 		Provider: "openai", ID: "gpt-5.6-luna", DisplayName: "GPT-5.6 Luna",
-		ContextWindow: 1050000, MaxOutput: 128000, Reasoning: true,
-		PriceInput: 1, PriceOutput: 6, PriceCacheRead: 0.1,
+		ContextWindow: 272000, MaxOutput: 128000, Reasoning: true,
+		PriceInput: 1, PriceOutput: 6, PriceCacheRead: 0.1, PriceCacheWrite: 1.25,
 		Speculative: true,
 	},
 	{
 		Provider: "openai", ID: "gpt-5.6-sol", DisplayName: "GPT-5.6 Sol",
-		ContextWindow: 1050000, MaxOutput: 128000, Reasoning: true,
-		PriceInput: 5, PriceOutput: 30, PriceCacheRead: 0.5,
+		ContextWindow: 272000, MaxOutput: 128000, Reasoning: true,
+		PriceInput: 5, PriceOutput: 30, PriceCacheRead: 0.5, PriceCacheWrite: 6.25,
 		Speculative: true,
 	},
 	{
 		Provider: "openai", ID: "gpt-5.6-terra", DisplayName: "GPT-5.6 Terra",
-		ContextWindow: 1050000, MaxOutput: 128000, Reasoning: true,
-		PriceInput: 2.5, PriceOutput: 15, PriceCacheRead: 0.25,
+		ContextWindow: 272000, MaxOutput: 128000, Reasoning: true,
+		PriceInput: 2.5, PriceOutput: 15, PriceCacheRead: 0.25, PriceCacheWrite: 3.125,
 		Speculative: true,
 	},
 
@@ -364,20 +364,20 @@ var Catalog = []Model{
 	},
 	{
 		Provider: "openai-codex", ID: "gpt-5.6-luna", DisplayName: "GPT-5.6 Luna",
-		ContextWindow: 1050000, MaxOutput: 128000, Reasoning: true,
-		PriceInput: 1, PriceOutput: 6, PriceCacheRead: 0.1,
+		ContextWindow: 372000, MaxOutput: 128000, Reasoning: true,
+		PriceInput: 1, PriceOutput: 6, PriceCacheRead: 0.1, PriceCacheWrite: 1.25,
 		Speculative: true,
 	},
 	{
 		Provider: "openai-codex", ID: "gpt-5.6-sol", DisplayName: "GPT-5.6 Sol",
-		ContextWindow: 1050000, MaxOutput: 128000, Reasoning: true,
-		PriceInput: 5, PriceOutput: 30, PriceCacheRead: 0.5,
+		ContextWindow: 372000, MaxOutput: 128000, Reasoning: true,
+		PriceInput: 5, PriceOutput: 30, PriceCacheRead: 0.5, PriceCacheWrite: 6.25,
 		Speculative: true,
 	},
 	{
 		Provider: "openai-codex", ID: "gpt-5.6-terra", DisplayName: "GPT-5.6 Terra",
-		ContextWindow: 1050000, MaxOutput: 128000, Reasoning: true,
-		PriceInput: 2.5, PriceOutput: 15, PriceCacheRead: 0.25,
+		ContextWindow: 372000, MaxOutput: 128000, Reasoning: true,
+		PriceInput: 2.5, PriceOutput: 15, PriceCacheRead: 0.25, PriceCacheWrite: 3.125,
 		Speculative: true,
 	},
 }

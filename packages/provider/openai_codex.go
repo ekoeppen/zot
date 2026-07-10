@@ -38,11 +38,11 @@ import (
 const codexDefaultBaseURL = "https://chatgpt.com/backend-api/codex/responses"
 
 type codexClient struct {
-	token                string
-	accountID            string
-	baseURL              string
-	codexRoutingAllGPT56 bool
-	http                 *http.Client
+	token      string
+	accountID  string
+	baseURL    string
+	errorLabel string
+	http       *http.Client
 }
 
 // NewOpenAICodex creates a client that talks to ChatGPT's Codex endpoint
@@ -53,10 +53,11 @@ func NewOpenAICodex(token, accountID, baseURL string) Client {
 		baseURL = codexDefaultBaseURL
 	}
 	return &codexClient{
-		token:     token,
-		accountID: accountID,
-		baseURL:   strings.TrimRight(baseURL, "/"),
-		http:      &http.Client{Timeout: 0},
+		token:      token,
+		accountID:  accountID,
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		errorLabel: "codex",
+		http:       &http.Client{Timeout: 0},
 	}
 }
 
@@ -323,10 +324,6 @@ func usesCodexCLIRouting(model string) bool {
 	}
 }
 
-func isGPT56PreviewModel(model string) bool {
-	return strings.HasPrefix(model, "gpt-5.6-")
-}
-
 func newCodexSessionID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -349,7 +346,7 @@ func (c *codexClient) Stream(ctx context.Context, req Request) (<-chan Event, er
 		return nil, err
 	}
 	var codexCLISessionID string
-	if usesCodexCLIRouting(wire.Model) || (c.codexRoutingAllGPT56 && isGPT56PreviewModel(wire.Model)) {
+	if usesCodexCLIRouting(wire.Model) {
 		codexCLISessionID = newCodexSessionID()
 		wire.PromptCacheKey = codexCLISessionID
 	}
@@ -641,14 +638,31 @@ func (c *codexClient) runStream(ctx context.Context, resp *http.Response, req Re
 				var p struct {
 					Message string `json:"message"`
 					Code    string `json:"code"`
+					Error   struct {
+						Message string `json:"message"`
+						Code    string `json:"code"`
+					} `json:"error"`
 				}
 				_ = json.Unmarshal([]byte(ev.Data), &p)
 				msg := p.Message
 				if msg == "" {
+					msg = p.Error.Message
+				}
+				if msg == "" {
 					msg = p.Code
 				}
+				if msg == "" {
+					msg = p.Error.Code
+				}
+				if msg == "" {
+					msg = strings.TrimSpace(ev.Data)
+				}
 				stop = StopError
-				finalErr = fmt.Errorf("codex error: %s", msg)
+				label := c.errorLabel
+				if label == "" {
+					label = "codex"
+				}
+				finalErr = fmt.Errorf("%s error: %s", label, msg)
 				sendDone()
 				return
 			}
