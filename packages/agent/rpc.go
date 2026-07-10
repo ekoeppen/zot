@@ -30,6 +30,7 @@ import (
 //	{"id":"3","type":"compact"}
 //	{"id":"4","type":"get_state"}
 //	{"id":"5","type":"set_model","model":"claude-opus-4-5"}
+//	{"id":"6","type":"set_reasoning","reasoning":"max"}
 //	{"id":"6","type":"get_messages"}
 //	{"id":"7","type":"clear"}
 //	{"id":"8","type":"get_models"}
@@ -301,6 +302,24 @@ func (s *rpcServer) dispatch(cmd, id string, raw []byte) {
 		s.model = req.Model
 		s.writeResponse(id, cmd, map[string]any{"model": req.Model})
 
+	case "set_reasoning":
+		var req struct {
+			Reasoning string `json:"reasoning"`
+		}
+		if err := json.Unmarshal(raw, &req); err != nil {
+			s.writeError(id, cmd, err.Error())
+			return
+		}
+		reasoning := provider.NormalizeReasoning(req.Reasoning)
+		switch reasoning {
+		case "", "minimum", "low", "medium", "high", "xhigh", "max":
+		default:
+			s.writeError(id, cmd, "reasoning must be off|minimum|low|medium|high|xhigh|max")
+			return
+		}
+		s.agent.Reasoning = reasoning
+		s.writeResponse(id, cmd, map[string]any{"reasoning": reasoning})
+
 	case "get_models":
 		out := []map[string]any{}
 		for _, m := range provider.ModelsForProvider(s.provider) {
@@ -388,6 +407,7 @@ func (s *rpcServer) snapshotState() map[string]any {
 	return map[string]any{
 		"provider":      s.provider,
 		"model":         s.model,
+		"reasoning":     s.agent.Reasoning,
 		"cwd":           s.args.CWD,
 		"message_count": len(s.agent.Messages()),
 		"busy":          s.activeCancel != nil,

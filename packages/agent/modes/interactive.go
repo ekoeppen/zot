@@ -2927,7 +2927,8 @@ func (i *Interactive) openSettingsDialog() {
 		{value: "low", label: "low", desc: "light (~2k tokens)"},
 		{value: "medium", label: "medium", desc: "moderate (~8k tokens)"},
 		{value: "high", label: "high", desc: "deep (~16k tokens)"},
-		{value: "maximum", label: "maximum", desc: "highest (~32k tokens)"},
+		{value: "xhigh", label: "xhigh", desc: "extra-high effort"},
+		{value: "max", label: "max", desc: "unconstrained effort on supported models"},
 	}
 	reasoning := provider.NormalizeReasoning(i.cfg.Reasoning)
 	reasoningChoice := 0

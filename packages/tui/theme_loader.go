@@ -92,6 +92,8 @@ type ThemeOverrides struct {
 	Error             *int                 `json:"error,omitempty"`
 	Warning           *int                 `json:"warning,omitempty"`
 	Spinner           *int                 `json:"spinner,omitempty"`
+	ThinkingMax       *int                 `json:"thinking_max,omitempty"`
+	ThinkingMaxCamel  *int                 `json:"thinkingMax,omitempty"`
 	SelectionBG       *int                 `json:"selection_bg,omitempty"`
 	SelectionFG       *int                 `json:"selection_fg,omitempty"`
 	SpinnerFrames     []string             `json:"spinner_frames,omitempty"`
@@ -382,6 +384,11 @@ func applyThemeOverrides(th Theme, o ThemeOverrides) Theme {
 	}
 	if o.Spinner != nil {
 		th.Spinner = *o.Spinner
+	}
+	if o.ThinkingMax != nil {
+		th.ThinkingMax = *o.ThinkingMax
+	} else if o.ThinkingMaxCamel != nil {
+		th.ThinkingMax = *o.ThinkingMaxCamel
 	}
 	if o.SelectionBG != nil {
 		th.SelectionBG = *o.SelectionBG

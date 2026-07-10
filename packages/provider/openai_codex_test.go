@@ -114,6 +114,17 @@ func TestCodexPreviewModelUsesCodexCLIShape(t *testing.T) {
 	}
 }
 
+func TestGPT56UsesNativeMaxReasoningEffort(t *testing.T) {
+	c := NewOpenAICodex("token", "acct", "").(*codexClient)
+	wire, err := c.buildRequest(Request{Model: "gpt-5.6-sol", Reasoning: "max"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wire.Reasoning == nil || wire.Reasoning.Effort != "max" {
+		t.Fatalf("reasoning = %+v", wire.Reasoning)
+	}
+}
+
 func TestOpenAIGPT56DoesNotUseCodexCLIRouting(t *testing.T) {
 	named := NewOpenAIResponsesNamed("token", "https://example.test/v1/responses", "openai").(*renamedClient)
 	c := named.inner.(*codexClient)

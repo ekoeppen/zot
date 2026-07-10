@@ -174,7 +174,7 @@ func (c *codexClient) buildRequest(req Request) (*codexRequest, error) {
 		Include:           []string{"reasoning.encrypted_content"},
 	}
 	if m.Reasoning {
-		if effort := OpenAICodexReasoningEffort(req.Reasoning); effort != "" {
+		if effort := OpenAICodexReasoningEffort(req.Reasoning, req.Model); effort != "" {
 			body.Reasoning = &codexReasoningConfig{Effort: effort}
 		}
 	}

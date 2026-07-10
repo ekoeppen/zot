@@ -2453,8 +2453,8 @@ func StatusBar(p StatusBarParams) []string {
 	leftBuilder.WriteString(th.FG256(th.Muted, left))
 	if middle != "" {
 		leftBuilder.WriteString(pad)
-		// `middle` already has colorized context segments; wrap the rest in muted.
-		leftBuilder.WriteString(th.FG256(th.Muted, middle))
+		// Highlight the opt-in max tier; other status information stays muted.
+		leftBuilder.WriteString(th.FG256(thinkingStatusColor(th, thinkingText), middle))
 	}
 
 	cwd := shortenHome(p.CWD)
@@ -2489,7 +2489,7 @@ func StatusBar(p StatusBarParams) []string {
 			infoBuilder.WriteString(modelLine)
 			if middle != "" {
 				infoBuilder.WriteString(pad)
-				infoBuilder.WriteString(th.FG256(th.Muted, middle))
+				infoBuilder.WriteString(th.FG256(thinkingStatusColor(th, thinkingText), middle))
 			}
 			lines = append(lines, infoBuilder.String())
 		}
@@ -2533,16 +2533,24 @@ func appendWrappedStatusLines(lines []string, th Theme, pad, modelText, thinking
 	}
 
 	modelThinkingPlain := pad + modelText + pad + thinkingText
+	thinkingColor := thinkingStatusColor(th, thinkingText)
 	if cols <= 0 || visibleWidth(modelThinkingPlain) <= cols {
-		lines = append(lines, pad+th.FG256(th.Muted, modelText+pad+thinkingText))
+		lines = append(lines, pad+th.FG256(thinkingColor, modelText+pad+thinkingText))
 	} else {
 		lines = append(lines, modelLine)
-		lines = append(lines, pad+th.FG256(th.Muted, thinkingText))
+		lines = append(lines, pad+th.FG256(thinkingColor, thinkingText))
 	}
 	if statsText != "" {
 		lines = append(lines, pad+th.FG256(th.Muted, statsText))
 	}
 	return lines
+}
+
+func thinkingStatusColor(th Theme, thinkingText string) int {
+	if strings.HasSuffix(thinkingText, ": max") {
+		return th.ThinkingMax
+	}
+	return th.Muted
 }
 
 func thinkingLevelLabel(level string) string {
@@ -2551,8 +2559,10 @@ func thinkingLevelLabel(level string) string {
 		return ""
 	case "minimum", "minimal", "min":
 		return "minimal"
-	case "maximum", "max", "xhigh":
-		return "maximum"
+	case "maximum", "xhigh":
+		return "xhigh"
+	case "max":
+		return "max"
 	default:
 		return strings.ToLower(strings.TrimSpace(level))
 	}
