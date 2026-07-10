@@ -253,16 +253,6 @@ func NewGoogleVertex(apiKey, baseURL string) Client {
 	return NewVertex(apiKey, baseURL)
 }
 
-// NewAzureOpenAIResponses delegates to the real Azure OpenAI client.
-// Despite the provider id mentioning "responses", zot uses Azure's
-// Chat Completions endpoint (older but functionally complete for our
-// agent loop) to avoid duplicating the full openai-responses wire
-// client. Models register under provider id `azure-openai-responses`
-// so user catalogs keep working unchanged.
-func NewAzureOpenAIResponses(apiKey, baseURL string) Client {
-	return NewAzureOpenAI(apiKey, baseURL)
-}
-
 // NewMistral returns a Mistral client using their OpenAI-compatible Chat
 // Completions endpoint at https://api.mistral.ai/v1. Mistral also offers a
 // bespoke "Conversations" API, but the OpenAI-compat endpoint supports

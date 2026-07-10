@@ -63,11 +63,12 @@ func NewOpenAIResponsesNamed(apiKey, baseURL, name string) Client {
 		Timeout:   0,
 	}
 	inner := &codexClient{
-		token:      apiKey,
-		accountID:  "", // unused; transport strips the header
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		errorLabel: "openai",
-		http:       httpClient,
+		token:        apiKey,
+		accountID:    "", // unused; transport strips the header
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		errorLabel:   "openai",
+		providerName: name,
+		http:         httpClient,
 	}
 	return &renamedClient{inner: inner, name: name}
 }

@@ -38,11 +38,14 @@ import (
 const codexDefaultBaseURL = "https://chatgpt.com/backend-api/codex/responses"
 
 type codexClient struct {
-	token      string
-	accountID  string
-	baseURL    string
-	errorLabel string
-	http       *http.Client
+	token             string
+	accountID         string
+	baseURL           string
+	errorLabel        string
+	providerName      string
+	modelName         func(string) string
+	disableCLIRouting bool
+	http              *http.Client
 }
 
 // NewOpenAICodex creates a client that talks to ChatGPT's Codex endpoint
@@ -53,11 +56,12 @@ func NewOpenAICodex(token, accountID, baseURL string) Client {
 		baseURL = codexDefaultBaseURL
 	}
 	return &codexClient{
-		token:      token,
-		accountID:  accountID,
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		errorLabel: "codex",
-		http:       &http.Client{Timeout: 0},
+		token:        token,
+		accountID:    accountID,
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		errorLabel:   "codex",
+		providerName: "openai-codex",
+		http:         &http.Client{Timeout: 0},
 	}
 }
 
@@ -345,8 +349,11 @@ func (c *codexClient) Stream(ctx context.Context, req Request) (<-chan Event, er
 	if err != nil {
 		return nil, err
 	}
+	if c.modelName != nil {
+		wire.Model = c.modelName(wire.Model)
+	}
 	var codexCLISessionID string
-	if usesCodexCLIRouting(wire.Model) {
+	if !c.disableCLIRouting && usesCodexCLIRouting(wire.Model) {
 		codexCLISessionID = newCodexSessionID()
 		wire.PromptCacheKey = codexCLISessionID
 	}
@@ -402,7 +409,11 @@ func (c *codexClient) runStream(ctx context.Context, resp *http.Response, req Re
 	if model.ID == "" {
 		model, _ = FindModel("openai", req.Model)
 	}
-	out <- EventStart{Model: req.Model, Provider: "openai-codex"}
+	providerName := c.providerName
+	if providerName == "" {
+		providerName = "openai-codex"
+	}
+	out <- EventStart{Model: req.Model, Provider: providerName}
 
 	raw := make(chan sseEvent, 16)
 	go readSSE(resp.Body, raw)

@@ -30,7 +30,10 @@ import (
 	"strings"
 )
 
-const defaultAzureAPIVersion = "2024-10-21"
+const (
+	defaultAzureAPIVersion          = "2024-10-21"
+	defaultAzureResponsesAPIVersion = "v1"
+)
 
 // azureRewriteTransport rewrites every outgoing OpenAI Chat Completions
 // URL into the Azure deployment-scoped shape:
@@ -133,4 +136,90 @@ func NewAzureOpenAI(apiKey, baseURL string) Client {
 		headers: map[string]string{"api-key": apiKey},
 		http:    httpClient,
 	}
+}
+
+// azureResponsesTransport applies Azure API-key authentication and API
+// versioning to requests using the OpenAI Responses wire format.
+type azureResponsesTransport struct {
+	inner      http.RoundTripper
+	apiKey     string
+	apiVersion string
+}
+
+func (t *azureResponsesTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	clone.Header.Del("authorization")
+	clone.Header.Del("chatgpt-account-id")
+	clone.Header.Del("openai-beta")
+	clone.Header.Del("originator")
+	clone.Header.Set("api-key", t.apiKey)
+	q := clone.URL.Query()
+	q.Set("api-version", t.apiVersion)
+	clone.URL.RawQuery = q.Encode()
+	return t.inner.RoundTrip(clone)
+}
+
+// NewAzureOpenAIResponses creates an Azure OpenAI Responses API client.
+// The configured model id is used as the deployment name unless overridden
+// through AZURE_OPENAI_DEPLOYMENT_NAME_MAP (model=deployment pairs).
+func NewAzureOpenAIResponses(apiKey, baseURL string) Client {
+	if baseURL == "" {
+		baseURL = os.Getenv("AZURE_OPENAI_BASE_URL")
+		if baseURL == "" {
+			if resource := os.Getenv("AZURE_OPENAI_RESOURCE_NAME"); resource != "" {
+				baseURL = "https://" + resource + ".openai.azure.com"
+			}
+		}
+	}
+	if baseURL == "" {
+		return &unimplementedClient{
+			name: "azure-openai-responses",
+			hint: "set AZURE_OPENAI_BASE_URL or AZURE_OPENAI_RESOURCE_NAME (or pass --base-url)",
+		}
+	}
+
+	endpoint := strings.TrimRight(baseURL, "/")
+	switch {
+	case strings.HasSuffix(endpoint, "/openai/v1/responses"):
+	case strings.HasSuffix(endpoint, "/openai/v1"):
+		endpoint += "/responses"
+	case strings.HasSuffix(endpoint, "/openai"):
+		endpoint += "/v1/responses"
+	default:
+		endpoint += "/openai/v1/responses"
+	}
+	apiVersion := os.Getenv("AZURE_OPENAI_API_VERSION")
+	if apiVersion == "" {
+		apiVersion = defaultAzureResponsesAPIVersion
+	}
+	httpClient := &http.Client{
+		Transport: &azureResponsesTransport{
+			inner:      http.DefaultTransport,
+			apiKey:     apiKey,
+			apiVersion: apiVersion,
+		},
+		Timeout: 0,
+	}
+	inner := &codexClient{
+		token:             apiKey,
+		baseURL:           endpoint,
+		errorLabel:        "azure openai",
+		providerName:      "azure-openai-responses",
+		modelName:         azureDeploymentName,
+		disableCLIRouting: true,
+		http:              httpClient,
+	}
+	return &renamedClient{inner: inner, name: "azure-openai-responses"}
+}
+
+func azureDeploymentName(model string) string {
+	for _, pair := range strings.Split(os.Getenv("AZURE_OPENAI_DEPLOYMENT_NAME_MAP"), ",") {
+		parts := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+		if len(parts) == 2 && strings.TrimSpace(parts[0]) == model {
+			if deployment := strings.TrimSpace(parts[1]); deployment != "" {
+				return deployment
+			}
+		}
+	}
+	return model
 }
