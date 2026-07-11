@@ -28,11 +28,11 @@ type editArgs struct {
 	Edits []editOp `json:"edits"`
 }
 
-const editSchema = `{"type":"object","properties":{"path":{"type":"string"},"edits":{"type":"array","items":{"type":"object","properties":{"oldText":{"type":"string"},"newText":{"type":"string"}},"required":["oldText","newText"]}}},"required":["path","edits"]}`
+const editSchema = `{"type":"object","properties":{"path":{"type":"string","description":"File to modify, given as an absolute path or one relative to the working directory."},"edits":{"type":"array","description":"A set of non-overlapping substitutions, all located in the file content as it existed before this call.","items":{"type":"object","properties":{"oldText":{"type":"string","description":"A verbatim excerpt from the file being modified. Include enough surrounding text to identify exactly one location, without intersecting another edit."},"newText":{"type":"string","description":"Content that will replace the matched excerpt."}},"required":["oldText","newText"]}}},"required":["path","edits"]}`
 
 func (t *EditTool) Name() string { return "edit" }
 func (t *EditTool) Description() string {
-	return "Edit a file via exact-match replacements. Each oldText must be unique in the file. NEVER pass text from a different file as oldText. Prefer small unique blocks; for large or highly divergent rewrites, use write instead."
+	return "Apply exact substitutions to an existing file. Inspect that file before editing and take every oldText directly from its current contents. Use short excerpts that identify one location; choose write when replacing most or all of a file."
 }
 func (t *EditTool) Schema() json.RawMessage { return json.RawMessage(editSchema) }
 
@@ -68,43 +68,32 @@ func (t *EditTool) Execute(ctx context.Context, raw json.RawMessage, progress fu
 	body := string(bytes.ReplaceAll(orig, []byte("\r\n"), []byte("\n")))
 
 	// Validate all edits first (against original content, not sequentially).
-	// oldText == newText is a no-op (destination already has the desired
-	// text) — skip those rather than erroring so equalize/port flows can
-	// continue when a block is already in sync.
+	for i, e := range a.Edits {
+		if e.OldText == "" {
+			return core.ToolResult{}, fmt.Errorf("edit %d: oldText must not be empty", i+1)
+		}
+		if e.OldText == e.NewText {
+			return core.ToolResult{}, fmt.Errorf("edit %d: oldText equals newText", i+1)
+		}
+		count := strings.Count(body, e.OldText)
+		if count == 0 {
+			return core.ToolResult{}, fmt.Errorf("edit %d: oldText not found in %s; inspect that file again and use a verbatim excerpt with matching spaces and line breaks", i+1, a.Path)
+		}
+		if count > 1 {
+			return core.ToolResult{}, fmt.Errorf("edit %d: oldText matches %d times (must be unique) in %s", i+1, count, a.Path)
+		}
+	}
+
+	// Apply atomically (sorted by position so offsets stay valid as we splice).
 	type span struct {
 		start, end  int
 		replacement string
 	}
 	spans := make([]span, 0, len(a.Edits))
-	applied := 0
-	for i, e := range a.Edits {
-		if e.OldText == "" {
-			return core.ToolResult{}, fmt.Errorf("edit %d: oldText must not be empty", i+1)
-		}
-		count := strings.Count(body, e.OldText)
-		if count == 0 {
-			return core.ToolResult{}, fmt.Errorf("edit %d: oldText not found in %s", i+1, a.Path)
-		}
-		if count > 1 {
-			return core.ToolResult{}, fmt.Errorf("edit %d: oldText matches %d times (must be unique) in %s", i+1, count, a.Path)
-		}
-		if e.OldText == e.NewText {
-			continue
-		}
+	for _, e := range a.Edits {
 		idx := strings.Index(body, e.OldText)
 		spans = append(spans, span{start: idx, end: idx + len(e.OldText), replacement: e.NewText})
-		applied++
 	}
-
-	if applied == 0 {
-		// Every edit was already a no-op; file is unchanged.
-		return core.ToolResult{
-			Content: []provider.Content{provider.TextBlock{Text: "already up to date\n"}},
-			Details: map[string]any{"path": path, "edits": 0, "diff": ""},
-		}, nil
-	}
-
-	// Apply atomically (sorted by position so offsets stay valid as we splice).
 	// Check for overlaps.
 	for i := 0; i < len(spans); i++ {
 		for j := i + 1; j < len(spans); j++ {
@@ -148,7 +137,7 @@ func (t *EditTool) Execute(ctx context.Context, raw json.RawMessage, progress fu
 	// want it.
 	return core.ToolResult{
 		Content: []provider.Content{provider.TextBlock{Text: diff}},
-		Details: map[string]any{"path": path, "edits": applied, "diff": diff},
+		Details: map[string]any{"path": path, "edits": len(a.Edits), "diff": diff},
 	}, nil
 }
 
