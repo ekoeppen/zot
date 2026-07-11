@@ -32,7 +32,7 @@ const editSchema = `{"type":"object","properties":{"path":{"type":"string"},"edi
 
 func (t *EditTool) Name() string { return "edit" }
 func (t *EditTool) Description() string {
-	return "Edit a file via exact-match replacements. Each oldText must be unique in the file."
+	return "Edit a file via exact-match replacements. Each oldText must be unique in the file. NEVER pass text from a different file as oldText. Prefer small unique blocks; for large or highly divergent rewrites, use write instead."
 }
 func (t *EditTool) Schema() json.RawMessage { return json.RawMessage(editSchema) }
 
@@ -68,12 +68,18 @@ func (t *EditTool) Execute(ctx context.Context, raw json.RawMessage, progress fu
 	body := string(bytes.ReplaceAll(orig, []byte("\r\n"), []byte("\n")))
 
 	// Validate all edits first (against original content, not sequentially).
+	// oldText == newText is a no-op (destination already has the desired
+	// text) — skip those rather than erroring so equalize/port flows can
+	// continue when a block is already in sync.
+	type span struct {
+		start, end  int
+		replacement string
+	}
+	spans := make([]span, 0, len(a.Edits))
+	applied := 0
 	for i, e := range a.Edits {
 		if e.OldText == "" {
 			return core.ToolResult{}, fmt.Errorf("edit %d: oldText must not be empty", i+1)
-		}
-		if e.OldText == e.NewText {
-			return core.ToolResult{}, fmt.Errorf("edit %d: oldText equals newText", i+1)
 		}
 		count := strings.Count(body, e.OldText)
 		if count == 0 {
@@ -82,18 +88,23 @@ func (t *EditTool) Execute(ctx context.Context, raw json.RawMessage, progress fu
 		if count > 1 {
 			return core.ToolResult{}, fmt.Errorf("edit %d: oldText matches %d times (must be unique) in %s", i+1, count, a.Path)
 		}
+		if e.OldText == e.NewText {
+			continue
+		}
+		idx := strings.Index(body, e.OldText)
+		spans = append(spans, span{start: idx, end: idx + len(e.OldText), replacement: e.NewText})
+		applied++
+	}
+
+	if applied == 0 {
+		// Every edit was already a no-op; file is unchanged.
+		return core.ToolResult{
+			Content: []provider.Content{provider.TextBlock{Text: "already up to date\n"}},
+			Details: map[string]any{"path": path, "edits": 0, "diff": ""},
+		}, nil
 	}
 
 	// Apply atomically (sorted by position so offsets stay valid as we splice).
-	type span struct {
-		start, end  int
-		replacement string
-	}
-	spans := make([]span, 0, len(a.Edits))
-	for _, e := range a.Edits {
-		idx := strings.Index(body, e.OldText)
-		spans = append(spans, span{start: idx, end: idx + len(e.OldText), replacement: e.NewText})
-	}
 	// Check for overlaps.
 	for i := 0; i < len(spans); i++ {
 		for j := i + 1; j < len(spans); j++ {
@@ -137,7 +148,7 @@ func (t *EditTool) Execute(ctx context.Context, raw json.RawMessage, progress fu
 	// want it.
 	return core.ToolResult{
 		Content: []provider.Content{provider.TextBlock{Text: diff}},
-		Details: map[string]any{"path": path, "edits": len(a.Edits), "diff": diff},
+		Details: map[string]any{"path": path, "edits": applied, "diff": diff},
 	}, nil
 }
 

@@ -158,6 +158,102 @@ func TestEditAmbiguous(t *testing.T) {
 	}
 }
 
+// TestEditNoOpWhenAlreadyInSync: oldText == newText means the destination
+// already has the desired block. That is success, not an error — equalize
+// flows must keep going.
+func TestEditNoOpWhenAlreadyInSync(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.txt")
+	orig := "hello world\n"
+	if err := os.WriteFile(p, []byte(orig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := &EditTool{CWD: dir}
+	res, err := tool.Execute(context.Background(), mustJSON(t, map[string]any{
+		"path":  "a.txt",
+		"edits": []map[string]any{{"oldText": "hello world", "newText": "hello world"}},
+	}), nil)
+	if err != nil {
+		t.Fatalf("no-op edit should succeed: %v", err)
+	}
+	b, _ := os.ReadFile(p)
+	if string(b) != orig {
+		t.Fatalf("file changed on no-op: got %q", b)
+	}
+	got := res.Content[0].(provider.TextBlock).Text
+	if !strings.Contains(got, "already up to date") {
+		t.Fatalf("want already-up-to-date result, got %q", got)
+	}
+}
+
+func TestEditSkipsNoOpAmongRealEdits(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(p, []byte("a\nb\nc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := &EditTool{CWD: dir}
+	_, err := tool.Execute(context.Background(), mustJSON(t, map[string]any{
+		"path": "a.txt",
+		"edits": []map[string]any{
+			{"oldText": "a", "newText": "a"}, // already in sync
+			{"oldText": "c", "newText": "C"},
+		},
+	}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(p)
+	if string(b) != "a\nb\nC\n" {
+		t.Fatalf("got %q", b)
+	}
+}
+
+// TestEditOldTextNotFoundGuidesRecovery covers the equalize-divergent-files
+// failure mode: oldText taken from a different file than path. The error
+// must tell the model to re-read the destination and edit in blocks (or write).
+func TestEditOldTextNotFoundGuidesRecovery(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "desktop.ts")
+	if err := os.WriteFile(p, []byte("export const timer: ReturnType<typeof setTimeout> | null = null\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := &EditTool{CWD: dir}
+	// Content shaped like a sibling "browser" file — not present in desktop.ts.
+	_, err := tool.Execute(context.Background(), mustJSON(t, map[string]any{
+		"path": "desktop.ts",
+		"edits": []map[string]any{{
+			"oldText": "export const timer: number | null = null;",
+			"newText": "export const timer: ReturnType<typeof setTimeout> | null = null",
+		}},
+	}), nil)
+	if err == nil {
+		t.Fatal("want oldText not found error")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"oldText not found",
+		"desktop.ts",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error missing %q; got %q", want, msg)
+		}
+	}
+}
+
+func TestEditDescriptionGuidesReadBeforeEdit(t *testing.T) {
+	desc := (&EditTool{}).Description()
+	for _, want := range []string{
+		"different file",
+		"write",
+		"small unique blocks",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("Description missing %q; got %q", want, desc)
+		}
+	}
+}
+
 func TestEditPreservesCRLF(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "a.txt")
