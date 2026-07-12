@@ -73,9 +73,10 @@ The easiest way is to just run `zot` and type `/login`. The TUI opens even witho
 3. `$ZOT_HOME/auth.json` (API key or OAuth token; mode 0600)
 
 `$ZOT_HOME` defaults to:
-- macOS: `~/Library/Application Support/zot`
-- Linux: `$XDG_STATE_HOME/zot` or `~/.local/state/zot`
-- Windows: `%LOCALAPPDATA%\zot`
+- All platforms: `$XDG_STATE_HOME/zot` when `XDG_STATE_HOME` is set
+- macOS fallback: `~/Library/Application Support/zot`
+- Linux fallback: `~/.local/state/zot`
+- Windows fallback: `%LOCALAPPDATA%\zot`
 
 ### `/login` flow
 
@@ -392,7 +393,7 @@ No configuration is required — the candidate list is built dynamically from yo
 
 ### Custom models
 
-Place a `models.json` in `$ZOT_HOME` (macOS: `~/Library/Application Support/zot/`, Linux: `~/.local/state/zot/`) to add models that aren't in the baked-in catalog or to override existing entries:
+Place a `models.json` in `$ZOT_HOME` (`$XDG_STATE_HOME/zot/` when set, otherwise the platform default above) to add models that aren't in the baked-in catalog or to override existing entries:
 
 ```json
 {

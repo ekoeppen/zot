@@ -4,10 +4,10 @@ BIN := $(notdir $(CURDIR))
 # Must match "name" in extension.json (slash command/logical extension name).
 EXT := mcp
 ZOT_HOME ?= $(shell \
-	if [ "$$(uname -s)" = "Darwin" ]; then \
-		printf '%s/Library/Application Support/zot' "$$HOME"; \
-	elif [ -n "$$XDG_STATE_HOME" ]; then \
+	if [ -n "$$XDG_STATE_HOME" ]; then \
 		printf '%s/zot' "$$XDG_STATE_HOME"; \
+	elif [ "$$(uname -s)" = "Darwin" ]; then \
+		printf '%s/Library/Application Support/zot' "$$HOME"; \
 	else \
 		printf '%s/.local/state/zot' "$$HOME"; \
 	fi)
