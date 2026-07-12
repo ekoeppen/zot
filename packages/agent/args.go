@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/patriceckhart/zot/packages/agent/tools"
 	"github.com/patriceckhart/zot/packages/tui"
 	"golang.org/x/term"
 )
@@ -100,6 +101,13 @@ type Args struct {
 	// swarm-spawned agent. Empty in every other mode. Set by
 	// --swarm-agent <path>; presence flips Mode to ModeSwarmAgent.
 	SwarmAgent string
+
+	// AgentName/AgentDataDir/PermissionSet are populated by `zot run`
+	// for local Zotfile agents. They scope sessions and enforce the
+	// manifest's declared file/bash permissions.
+	AgentName     string
+	AgentDataDir  string
+	PermissionSet *tools.PermissionSet
 }
 
 // ParseArgs parses the process arguments (excluding argv[0]).

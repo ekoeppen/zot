@@ -1,0 +1,684 @@
+package agent
+
+import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/klauspost/compress/zstd"
+	"github.com/patriceckhart/zot/packages/agent/tools"
+	"github.com/patriceckhart/zot/packages/provider"
+	"github.com/patriceckhart/zot/packages/provider/auth"
+	"golang.org/x/term"
+)
+
+type ZotfileManifest struct {
+	Zotfile     int    `json:"zotfile"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+	License     string `json:"license"`
+	Runtime     struct {
+		MinZot string `json:"min_zot"`
+	} `json:"runtime"`
+	Model struct {
+		Requires   []string `json:"requires"`
+		MinContext int      `json:"min_context"`
+		Preferred  []string `json:"preferred"`
+		MinTier    string   `json:"min_tier"`
+	} `json:"model"`
+	Permissions  tools.PermissionSet `json:"permissions"`
+	Requirements struct {
+		Bin []string `json:"bin"`
+		OS  []string `json:"os"`
+	} `json:"requirements"`
+	Entry struct {
+		Greeting      string  `json:"greeting"`
+		DefaultPrompt *string `json:"default_prompt"`
+	} `json:"entry"`
+	ReplaceSystemPrompt bool `json:"replace_system_prompt"`
+}
+
+type zotfileLoaded struct {
+	Dir      string
+	Temp     bool
+	Digest   string
+	Manifest ZotfileManifest
+}
+
+func runZotfileCommand(rawArgs []string, version string) (bool, error) {
+	if len(rawArgs) == 0 {
+		return false, nil
+	}
+	switch rawArgs[0] {
+	case "pack":
+		dir := "."
+		out := ""
+		if len(rawArgs) > 1 {
+			dir = rawArgs[1]
+		}
+		if len(rawArgs) > 2 {
+			out = rawArgs[2]
+		}
+		return true, zotPack(dir, out)
+	case "inspect":
+		if len(rawArgs) < 2 {
+			return true, fmt.Errorf("zot inspect requires a .zot file or directory")
+		}
+		return true, zotInspect(rawArgs[1])
+	case "verify":
+		if len(rawArgs) < 2 {
+			return true, fmt.Errorf("zot verify requires a .zot file or directory")
+		}
+		zf, cleanup, err := loadZotfile(rawArgs[1])
+		if cleanup != nil {
+			defer cleanup()
+		}
+		if err != nil {
+			return true, err
+		}
+		fmt.Printf("ok  digest sha256:%s\n", zf.Digest)
+		return true, nil
+	case "run":
+		if len(rawArgs) < 2 {
+			return true, fmt.Errorf("zot run requires a .zot file or directory")
+		}
+		ref := rawArgs[1]
+		rest := rawArgs[2:]
+		args, err := ParseArgs(rest)
+		if err != nil {
+			PrintHelp(version)
+			return true, err
+		}
+		return true, runLocalZotfile(ref, args, version)
+	default:
+		return false, nil
+	}
+}
+
+func runLocalZotfile(ref string, args Args, version string) error {
+	prepareRuntimeCatalog()
+	zf, cleanup, err := loadZotfile(ref)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		return err
+	}
+	if err := checkZotfileRequirements(zf, version); err != nil {
+		return err
+	}
+	agentData := filepath.Join(ZotHome(), "agents", safeAgentName(zf.Manifest.Name), "data")
+	if err := os.MkdirAll(agentData, 0o755); err != nil {
+		return err
+	}
+	perms := zf.Manifest.Permissions.Expand(args.CWD, agentData)
+	if err := consentZotfile(zf, perms); err != nil {
+		return err
+	}
+	agentPath := filepath.Join(zf.Dir, "AGENT.md")
+	agentPrompt, err := os.ReadFile(agentPath)
+	if err != nil {
+		return fmt.Errorf("read AGENT.md: %w", err)
+	}
+	if err := applyZotfileModelRequirements(&args, zf.Manifest); err != nil {
+		return err
+	}
+	if zf.Manifest.ReplaceSystemPrompt {
+		args.SystemPrompt = strings.TrimSpace(string(agentPrompt))
+	} else {
+		args.AppendSystemPrompt = append(args.AppendSystemPrompt, strings.TrimSpace(string(agentPrompt)))
+	}
+	if args.Prompt == "" && zf.Manifest.Entry.DefaultPrompt != nil {
+		args.Prompt = *zf.Manifest.Entry.DefaultPrompt
+	}
+	if dirExists(filepath.Join(zf.Dir, "skills")) {
+		old := os.Getenv("ZOT_AGENT_SKILLS")
+		v := filepath.Join(zf.Dir, "skills")
+		if old != "" {
+			v += string(os.PathListSeparator) + old
+		}
+		_ = os.Setenv("ZOT_AGENT_SKILLS", v)
+		defer os.Setenv("ZOT_AGENT_SKILLS", old)
+	}
+	args.AgentName = zf.Manifest.Name
+	args.AgentDataDir = agentData
+	args.PermissionSet = &perms
+	return runWithArgs(args, version)
+}
+
+func zotInspect(ref string) error {
+	zf, cleanup, err := loadZotfile(ref)
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		return err
+	}
+	m := zf.Manifest
+	fmt.Printf("name: %s\nversion: %s\ndescription: %s\ndigest: sha256:%s\n", m.Name, m.Version, m.Description, zf.Digest)
+	fmt.Println("\npermissions:")
+	fmt.Print(permissionSummary(m.Permissions))
+	fmt.Println("\nfiles:")
+	return filepath.WalkDir(zf.Dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || path == zf.Dir {
+			return err
+		}
+		rel, _ := filepath.Rel(zf.Dir, path)
+		if d.IsDir() {
+			rel += "/"
+		}
+		fmt.Println("  " + filepath.ToSlash(rel))
+		return nil
+	})
+}
+
+func applyZotfileModelRequirements(args *Args, m ZotfileManifest) error {
+	minCtx := m.Model.MinContext
+	requires := map[string]bool{}
+	for _, capability := range m.Model.Requires {
+		requires[strings.ToLower(strings.TrimSpace(capability))] = true
+	}
+	for capability := range requires {
+		if capability != "tools" && capability != "vision" && capability != "reasoning" {
+			return fmt.Errorf("unsupported model requirement %q", capability)
+		}
+	}
+	if m.Model.MinTier != "" {
+		return fmt.Errorf("model.min_tier is not supported by this zot version")
+	}
+	compatible := func(model provider.Model) bool {
+		if model.ContextWindow < minCtx {
+			return false
+		}
+		if requires["reasoning"] && !model.Reasoning {
+			return false
+		}
+		// Every model exposed by the current catalog supports text and tools.
+		// Vision support is not represented in Model yet, so fail closed.
+		return !requires["vision"]
+	}
+	if minCtx <= 0 && len(requires) == 0 {
+		return nil
+	}
+	if args.Model != "" {
+		model, err := provider.FindModel(args.Provider, args.Model)
+		if err != nil {
+			model, err = provider.FindModel("", args.Model)
+		}
+		if err != nil {
+			return nil
+		}
+		if !compatible(model) {
+			return fmt.Errorf("model %s does not satisfy the agent requirements", model.ID)
+		}
+		return nil
+	}
+	cfg, _ := LoadConfig()
+	if cfg.Model != "" {
+		model, err := provider.FindModel(cfg.Provider, cfg.Model)
+		if err == nil && compatible(model) {
+			return nil
+		}
+	}
+	for _, id := range m.Model.Preferred {
+		model, err := provider.FindModel("", id)
+		if err == nil && compatible(model) {
+			args.Provider = model.Provider
+			args.Model = model.ID
+			return nil
+		}
+	}
+	for _, model := range provider.Active() {
+		if compatible(model) {
+			args.Provider = model.Provider
+			args.Model = model.ID
+			return nil
+		}
+	}
+	return fmt.Errorf("no catalog model satisfies the agent requirements")
+}
+
+func prepareRuntimeCatalog() {
+	LoadCachedModels()
+	LoadUserModels()
+	if cps := provider.CustomProviders(); len(cps) > 0 {
+		var names []string
+		for name := range cps {
+			if !isBuiltinProvider(name) {
+				names = append(names, name)
+			}
+		}
+		auth.SetExtraAPIKeyProviders(names)
+	}
+	ValidateAndRepairConfig()
+	RefreshModelsAsync()
+}
+
+func zotPack(dir, out string) error {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	if _, err := readZotManifest(abs); err != nil {
+		return err
+	}
+	if err := validateZotfileDir(abs); err != nil {
+		return err
+	}
+	if out == "" {
+		m, _ := readZotManifest(abs)
+		base := safeAgentName(m.Name)
+		if base == "" {
+			base = filepath.Base(abs)
+		}
+		out = base + ".zot"
+	}
+	if filepath.Ext(out) != ".zot" {
+		out += ".zot"
+	}
+	outAbs, err := filepath.Abs(out)
+	if err != nil {
+		return err
+	}
+	f, err := os.Create(out)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	h := sha256.New()
+	mw := io.MultiWriter(f, h)
+	enc, err := zstd.NewWriter(mw)
+	if err != nil {
+		return err
+	}
+	if err := writeCanonicalTar(abs, enc, outAbs); err != nil {
+		enc.Close()
+		return err
+	}
+	if err := enc.Close(); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %s\ndigest sha256:%s\n", out, hex.EncodeToString(h.Sum(nil)))
+	return nil
+}
+
+func loadZotfile(ref string) (zotfileLoaded, func(), error) {
+	info, err := os.Stat(ref)
+	if err != nil {
+		return zotfileLoaded{}, nil, err
+	}
+	if info.IsDir() {
+		abs, _ := filepath.Abs(ref)
+		m, err := readZotManifest(abs)
+		if err != nil {
+			return zotfileLoaded{}, nil, err
+		}
+		if err := validateZotfileDir(abs); err != nil {
+			return zotfileLoaded{}, nil, err
+		}
+		return zotfileLoaded{Dir: abs, Manifest: m, Digest: digestDirectory(abs)}, nil, nil
+	}
+	tmp, err := os.MkdirTemp("", "zotfile-*")
+	if err != nil {
+		return zotfileLoaded{}, nil, err
+	}
+	cleanup := func() { _ = os.RemoveAll(tmp) }
+	digest, err := unpackZotArchive(ref, tmp)
+	if err != nil {
+		cleanup()
+		return zotfileLoaded{}, nil, err
+	}
+	m, err := readZotManifest(tmp)
+	if err != nil {
+		cleanup()
+		return zotfileLoaded{}, nil, err
+	}
+	if err := validateZotfileDir(tmp); err != nil {
+		cleanup()
+		return zotfileLoaded{}, nil, err
+	}
+	return zotfileLoaded{Dir: tmp, Temp: true, Digest: digest, Manifest: m}, cleanup, nil
+}
+
+func readZotManifest(dir string) (ZotfileManifest, error) {
+	var m ZotfileManifest
+	b, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		return m, fmt.Errorf("manifest.json is required: %w", err)
+	}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return m, fmt.Errorf("manifest.json: %w", err)
+	}
+	if m.Zotfile != 1 {
+		return m, fmt.Errorf("unsupported zotfile version %d", m.Zotfile)
+	}
+	name := strings.TrimSpace(m.Name)
+	if name == "" {
+		return m, fmt.Errorf("manifest name is required")
+	}
+	if name != strings.ToLower(name) || safeAgentName(name) != name {
+		return m, fmt.Errorf("manifest name must contain only lowercase letters, digits, dots, hyphens, or underscores")
+	}
+	if len(m.Permissions.Net.Allow) > 0 {
+		return m, fmt.Errorf("permissions.net is not supported by the local runtime yet")
+	}
+	if len(m.Permissions.Env.Read) > 0 {
+		return m, fmt.Errorf("permissions.env is not supported by the local runtime yet")
+	}
+	mode := strings.ToLower(strings.TrimSpace(m.Permissions.Bash.Mode))
+	if mode != "" && mode != "none" && mode != "ask" && mode != "allowlist" {
+		return m, fmt.Errorf("unsupported bash permission mode %q", m.Permissions.Bash.Mode)
+	}
+	if mode == "allowlist" && len(m.Permissions.Bash.Allow) == 0 {
+		return m, fmt.Errorf("bash allowlist mode requires at least one command")
+	}
+	return m, nil
+}
+
+func validateZotfileDir(dir string) error {
+	st, err := os.Stat(filepath.Join(dir, "AGENT.md"))
+	if err != nil || !st.Mode().IsRegular() {
+		return fmt.Errorf("AGENT.md is required")
+	}
+	if exts := bundledExtensionDirs(filepath.Join(dir, "extensions")); len(exts) > 0 {
+		return fmt.Errorf("bundled executable extensions are not supported by the local runtime: they cannot yet be confined to manifest permissions")
+	}
+	return nil
+}
+
+const (
+	maxZotfileCompressedSize = 100 << 20
+	maxZotfileEntrySize      = 64 << 20
+	maxZotfileExpandedSize   = 256 << 20
+)
+
+func unpackZotArchive(path, dst string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.Size() > maxZotfileCompressedSize {
+		return "", fmt.Errorf("zotfile exceeds %d MiB compressed size limit", maxZotfileCompressedSize>>20)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(b)
+	r, err := zstd.NewReader(bytes.NewReader(b), zstd.WithDecoderMaxMemory(maxZotfileExpandedSize))
+	if err != nil {
+		// Development fallback for older experiments.
+		gr, gerr := gzip.NewReader(bytes.NewReader(b))
+		if gerr != nil {
+			return "", err
+		}
+		defer gr.Close()
+		return hex.EncodeToString(digest[:]), untar(gr, dst)
+	}
+	defer r.Close()
+	return hex.EncodeToString(digest[:]), untar(r, dst)
+}
+
+func untar(r io.Reader, dst string) error {
+	tr := tar.NewReader(r)
+	var expanded int64
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		name := filepath.Clean(h.Name)
+		if name == "." || strings.HasPrefix(name, "..") || filepath.IsAbs(name) {
+			return fmt.Errorf("unsafe path in archive: %s", h.Name)
+		}
+		path := filepath.Join(dst, name)
+		if h.Size < 0 || h.Size > maxZotfileEntrySize || expanded+h.Size > maxZotfileExpandedSize {
+			return fmt.Errorf("archive content exceeds extraction size limit: %s", h.Name)
+		}
+		expanded += h.Size
+		switch h.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				return err
+			}
+			f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(h.Mode)&0o777)
+			if err != nil {
+				return err
+			}
+			_, cerr := io.Copy(f, tr)
+			if err := f.Close(); err != nil && cerr == nil {
+				cerr = err
+			}
+			if cerr != nil {
+				return cerr
+			}
+		}
+	}
+}
+
+func writeCanonicalTar(root string, w io.Writer, exclude ...string) error {
+	excluded := map[string]bool{}
+	for _, p := range exclude {
+		if p == "" {
+			continue
+		}
+		abs, err := filepath.Abs(p)
+		if err == nil {
+			excluded[abs] = true
+		}
+	}
+	var files []string
+	if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || path == root {
+			return err
+		}
+		absPath, _ := filepath.Abs(path)
+		if excluded[absPath] {
+			return nil
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlinks are not supported in zotfiles: %s", path)
+		}
+		files = append(files, path)
+		return nil
+	}); err != nil {
+		return err
+	}
+	sort.Strings(files)
+	tw := tar.NewWriter(w)
+	defer tw.Close()
+	fixed := time.Unix(0, 0)
+	for _, path := range files {
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, path)
+		rel = filepath.ToSlash(rel)
+		h, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		h.Name = rel
+		h.ModTime = fixed
+		h.AccessTime = fixed
+		h.ChangeTime = fixed
+		h.Uid, h.Gid, h.Uname, h.Gname = 0, 0, "", ""
+		if info.IsDir() && !strings.HasSuffix(h.Name, "/") {
+			h.Name += "/"
+		}
+		if err := tw.WriteHeader(h); err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			_, cerr := io.Copy(tw, f)
+			_ = f.Close()
+			if cerr != nil {
+				return cerr
+			}
+		}
+	}
+	return nil
+}
+
+func checkZotfileRequirements(zf zotfileLoaded, version string) error {
+	if min := strings.TrimSpace(zf.Manifest.Runtime.MinZot); min != "" {
+		if versionOnly(version) == "0.0.0" {
+			return fmt.Errorf("agent requires zot %s or newer; unversioned development builds cannot satisfy min_zot", min)
+		}
+		if versionLess(version, min) {
+			return fmt.Errorf("agent requires zot %s or newer; running %s", min, versionOnly(version))
+		}
+	}
+	if len(zf.Manifest.Requirements.OS) > 0 {
+		ok := false
+		for _, osName := range zf.Manifest.Requirements.OS {
+			if osName == runtime.GOOS {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fmt.Errorf("agent does not support %s", runtime.GOOS)
+		}
+	}
+	if len(zf.Manifest.Requirements.Bin) > 0 {
+		for _, b := range zf.Manifest.Requirements.Bin {
+			if _, err := execLookPath(b); err != nil {
+				return fmt.Errorf("agent requires binary %q", b)
+			}
+		}
+	}
+	return nil
+}
+
+var execLookPath = exec.LookPath
+
+func consentZotfile(zf zotfileLoaded, perms tools.PermissionSet) error {
+	if os.Getenv("ZOT_AGENT_CONSENT") == "1" {
+		return nil
+	}
+	// "ask" deliberately requires approval on every launch. Other consent
+	// is durable only for this exact artifact digest, so any package change
+	// causes a fresh prompt.
+	consentPath := filepath.Join(ZotHome(), "agents", safeAgentName(zf.Manifest.Name), "consents", zf.Digest+".json")
+	if strings.ToLower(strings.TrimSpace(perms.Bash.Mode)) != "ask" {
+		if _, err := os.Stat(consentPath); err == nil {
+			return nil
+		}
+	}
+	fmt.Printf("Agent %s@%s wants to run.\n\n", zf.Manifest.Name, zf.Manifest.Version)
+	fmt.Print(permissionSummary(perms))
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return fmt.Errorf("refusing to run without interactive consent; set ZOT_AGENT_CONSENT=1 to allow")
+	}
+	fmt.Print("\nAllow? [y/N] ")
+	var answer string
+	_, _ = fmt.Fscanln(os.Stdin, &answer)
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	if answer != "y" && answer != "yes" {
+		return fmt.Errorf("declined")
+	}
+	if strings.ToLower(strings.TrimSpace(perms.Bash.Mode)) == "ask" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(consentPath), 0o700); err != nil {
+		return fmt.Errorf("save agent consent: %w", err)
+	}
+	receipt := map[string]string{"digest": zf.Digest, "name": zf.Manifest.Name, "version": zf.Manifest.Version}
+	data, _ := json.MarshalIndent(receipt, "", "  ")
+	if err := os.WriteFile(consentPath, append(data, '\n'), 0o600); err != nil {
+		return fmt.Errorf("save agent consent: %w", err)
+	}
+	return nil
+}
+
+func permissionSummary(p tools.PermissionSet) string {
+	var sb strings.Builder
+	if len(p.FS.Read) > 0 {
+		fmt.Fprintf(&sb, "  fs read: %s\n", strings.Join(p.FS.Read, ", "))
+	} else {
+		fmt.Fprintln(&sb, "  fs read: none")
+	}
+	if len(p.FS.Write) > 0 {
+		fmt.Fprintf(&sb, "  fs write: %s\n", strings.Join(p.FS.Write, ", "))
+	} else {
+		fmt.Fprintln(&sb, "  fs write: none")
+	}
+	mode := p.Bash.Mode
+	if mode == "" {
+		mode = "none"
+	}
+	fmt.Fprintf(&sb, "  bash: %s", mode)
+	if len(p.Bash.Allow) > 0 {
+		fmt.Fprintf(&sb, " (%s)", strings.Join(p.Bash.Allow, ", "))
+	}
+	fmt.Fprintln(&sb)
+	if len(p.Net.Allow) > 0 {
+		fmt.Fprintf(&sb, "  net: %s (declared, not enforced in this build)\n", strings.Join(p.Net.Allow, ", "))
+	}
+	if len(p.Env.Read) > 0 {
+		fmt.Fprintf(&sb, "  env read: %s (declared, not enforced in this build)\n", strings.Join(p.Env.Read, ", "))
+	}
+	return sb.String()
+}
+
+func bundledExtensionDirs(root string) []string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() && fileExists(filepath.Join(root, e.Name(), "extension.json")) {
+			out = append(out, filepath.Join(root, e.Name()))
+		}
+	}
+	return out
+}
+
+func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
+func dirExists(p string) bool  { st, err := os.Stat(p); return err == nil && st.IsDir() }
+
+func safeAgentName(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	s = strings.ReplaceAll(s, "/", "_")
+	s = strings.ReplaceAll(s, "\\", "_")
+	s = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.' {
+			return r
+		}
+		return '-'
+	}, s)
+	return strings.Trim(s, "-._")
+}
+
+func digestDirectory(dir string) string {
+	h := sha256.New()
+	_ = writeCanonicalTar(dir, h)
+	return hex.EncodeToString(h.Sum(nil))
+}

@@ -189,6 +189,13 @@ func Run(rawArgs []string, version string) error {
 	if handled, err := runUpdateCommand(rawArgs, version); handled {
 		return err
 	}
+	if handled, err := runZotfileCommand(rawArgs, version); handled {
+		return err
+	}
+	return runWithArgsRaw(rawArgs, version)
+}
+
+func runWithArgsRaw(rawArgs []string, version string) error {
 	// `zot rpc` is shorthand for `zot --rpc` so third-party apps can
 	// spawn the binary with a clean argv. Strip the leading 'rpc'
 	// token and let the rest flow through the normal arg parser.
@@ -211,39 +218,18 @@ func Run(rawArgs []string, version string) error {
 	}
 	// Model catalog: load any cached discovery data before we inspect
 	// the model list (list-models, print/json, interactive).
-	LoadCachedModels()
-	LoadUserModels()
-
-	// Register custom provider names with the auth package so they
-	// participate in /login API-key flow and provider pickers.
-	if cps := provider.CustomProviders(); len(cps) > 0 {
-		names := make([]string, 0, len(cps))
-		for name := range cps {
-			if !isBuiltinProvider(name) {
-				names = append(names, name)
-			}
-		}
-		auth.SetExtraAPIKeyProviders(names)
-	}
-
-	// Repair config.json so a stale (provider, model) pair from an
-	// interrupted /model switch can't strand the user with an
-	// "unknown model" error on the first turn. Runs before any UI
-	// renders so the status bar shows the post-repair pair, not the
-	// broken one. Silent on success.
-	ValidateAndRepairConfig()
+	prepareRuntimeCatalog()
 
 	if args.ListModels {
 		printModels()
 		return nil
 	}
 
+	return runWithArgs(args, version)
+}
+
+func runWithArgs(args Args, version string) error {
 	ctx := context.Background()
-
-	// Kick an async refresh of the live model catalog. The first run of
-	// zot hits the network; subsequent runs within CacheTTL do nothing.
-	RefreshModelsAsync()
-
 	switch args.Mode {
 	case ModePrint:
 		return runPrintMode(ctx, args, version)
@@ -835,6 +821,10 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 		wasJailed := sharedSandbox != nil && sharedSandbox.Locked()
 		args.CWD = absPath
 		r.CWD = absPath
+		if args.PermissionSet != nil {
+			expanded := args.PermissionSet.Expand(absPath, args.AgentDataDir)
+			args.PermissionSet = &expanded
+		}
 		if sharedSandbox != nil {
 			sharedSandbox.Root = absPath
 			if wasJailed {
@@ -857,8 +847,9 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 		// because /cd's semantics are "start fresh here", matching
 		// what relaunching `zot --cwd <path>` would do today.
 		if !args.NoSess {
-			core.PruneEmptySessions(ZotHome(), absPath)
-			newSess, serr := core.NewSession(ZotHome(), absPath, newProvider, newModel, version)
+			newRoot := agentSessionsRoot(ZotHome(), args)
+			core.PruneEmptySessions(newRoot, absPath)
+			newSess, serr := core.NewSession(newRoot, absPath, newProvider, newModel, version)
 			if serr != nil {
 				return fmt.Errorf("open session in %s: %v", absPath, serr)
 			}
@@ -1149,6 +1140,13 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 	return runErr
 }
 
+func agentSessionsRoot(root string, args Args) string {
+	if args.AgentName == "" {
+		return root
+	}
+	return filepath.Join(root, "sessions", "agents", safeAgentName(args.AgentName))
+}
+
 // openOrCreateSession returns a session for the run. sess may be nil
 // with a nil error if session persistence is disabled.
 func openOrCreateSession(args Args, r Resolved, ag *core.Agent, version string) (*core.Session, error) {
@@ -1158,7 +1156,8 @@ func openOrCreateSession(args Args, r Resolved, ag *core.Agent, version string) 
 	// Sweep meta-only files left over from older zot versions (and from
 	// any session that crashed before its first AppendMessage). Cheap;
 	// reads the first few bytes of each file in the cwd's session dir.
-	core.PruneEmptySessions(ZotHome(), args.CWD)
+	sessionsRoot := agentSessionsRoot(ZotHome(), args)
+	core.PruneEmptySessions(sessionsRoot, args.CWD)
 	var (
 		s    *core.Session
 		msgs []provider.Message
@@ -1180,12 +1179,12 @@ func openOrCreateSession(args Args, r Resolved, ag *core.Agent, version string) 
 			msgs = nil
 		}
 	case args.Continue:
-		latest := core.LatestSession(ZotHome(), args.CWD)
+		latest := core.LatestSession(sessionsRoot, args.CWD)
 		if latest != "" {
 			s, msgs, err = core.OpenSession(latest)
 		}
 	case args.Resume:
-		picked, perr := pickSession(args.CWD)
+		picked, perr := pickSession(sessionsRoot, args.CWD)
 		if perr != nil {
 			return nil, perr
 		}
@@ -1204,11 +1203,11 @@ func openOrCreateSession(args Args, r Resolved, ag *core.Agent, version string) 
 		}
 		return s, nil
 	}
-	return core.NewSession(ZotHome(), args.CWD, r.Provider, r.Model, version)
+	return core.NewSession(sessionsRoot, args.CWD, r.Provider, r.Model, version)
 }
 
-func pickSession(cwd string) (string, error) {
-	files := core.ListSessions(ZotHome(), cwd)
+func pickSession(root, cwd string) (string, error) {
+	files := core.ListSessions(root, cwd)
 	if len(files) == 0 {
 		fmt.Fprintln(os.Stderr, "no sessions for", cwd)
 		return "", nil

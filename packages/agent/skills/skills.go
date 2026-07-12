@@ -230,6 +230,11 @@ func searchDirs(zotHome, cwd, userHome string) []location {
 		}
 		out = append(out, location{dir: dir, label: label})
 	}
+	if extra := os.Getenv("ZOT_AGENT_SKILLS"); extra != "" {
+		for _, dir := range filepath.SplitList(extra) {
+			add(dir, "agent")
+		}
+	}
 	if cwd != "" {
 		add(filepath.Join(cwd, ".zot", "skills"), "project")
 	}

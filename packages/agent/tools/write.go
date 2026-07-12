@@ -40,7 +40,7 @@ func (t *WriteTool) Execute(ctx context.Context, raw json.RawMessage, progress f
 		return core.ToolResult{}, fmt.Errorf("path is required")
 	}
 	path := resolvePath(t.CWD, a.Path)
-	if err := t.Sandbox.CheckPath(path); err != nil {
+	if err := t.Sandbox.CheckWritePath(path); err != nil {
 		return core.ToolResult{}, err
 	}
 
