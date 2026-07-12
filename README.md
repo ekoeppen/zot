@@ -26,7 +26,7 @@ Yet another coding agent harness, lightweight and written (vibe-slopped) in go.
 - user and extension themes via JSON; see [docs/themes.md](docs/themes.md).
 - standing instructions via `AGENTS.md` files (global and per-project); see [Persistent instructions](#persistent-instructions-agentsmd).
 - reusable instructions via `SKILL.md` files; see [docs/skills.md](docs/skills.md).
-- portable local agents packaged as `.zot` files; see [docs/zotfiles.md](docs/zotfiles.md).
+- portable agents from local directories, `.zot` files, or temporary public GitHub downloads; see [docs/zotfiles.md](docs/zotfiles.md).
 
 ## Install
 
@@ -211,6 +211,18 @@ When the sandbox is on (see `/jail`), all four tools refuse paths outside the se
 - **Print**: `zot -p "prompt"` runs the agent to completion and writes only the final assistant text to stdout.
 - **JSON**: `zot --json "prompt"` emits one JSON object per agent event to stdout, newline-delimited. The schema is documented in [docs/rpc.md](docs/rpc.md).
 - **RPC**: `zot rpc` runs as a long-lived child process; commands in on stdin, events and responses out on stdout, both as NDJSON. Designed for embedding zot in third-party apps written in any language. See [docs/rpc.md](docs/rpc.md) for the wire schema and `examples/rpc/{python,node,shell,go}` for working clients.
+
+## zotfile agents
+
+A zotfile packages an agent's instructions, skills, requirements, and enforced tool permissions as a shareable agent. Run one from a local directory, a packed `.zot` artifact, or directly from a public GitHub repository:
+
+```bash
+zot run ./my-agent
+zot run ./my-agent.zot
+zot run https://github.com/patriceckhart/agents/zot-maintenance --cwd /path/to/zot
+```
+
+For a GitHub URL, zot downloads the repository archive into a temporary directory, validates and runs the selected agent, then removes the downloaded source when the command exits. Agent data, consent receipts, and sessions still persist under `$ZOT_HOME`. See [docs/zotfiles.md](docs/zotfiles.md) for authoring, permissions, packaging, and current limitations.
 
 ## Embedding
 

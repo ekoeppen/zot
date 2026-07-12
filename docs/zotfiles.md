@@ -2,7 +2,7 @@
 
 A Zotfile packages an agent's behavior into one portable `.zot` file. It can contain the agent's instructions, reusable skills, static assets, and metadata describing the runtime, model, operating-system, binary, and tool permissions it needs.
 
-The current implementation is the **local runtime**. It supports creating, inspecting, verifying, and running local directories and `.zot` archives. Registry distribution, installation, signatures, bundled executable extensions, network permissions, and environment permissions are not implemented yet.
+The current implementation supports creating, inspecting, verifying, and running local directories and `.zot` archives. It can also run an agent directory directly from a public GitHub repository without keeping a clone. Registry distribution, installation, signatures, bundled executable extensions, network permissions, and environment permissions are not implemented yet.
 
 ## Quick start
 
@@ -494,7 +494,21 @@ zot run ./my-agent.zot --json "Do the task"
 
 Arguments after the reference use zot's normal CLI parser, so model, provider, reasoning, cwd, session, tool, and output-mode flags remain available. The manifest still imposes its permission and compatibility ceiling.
 
-Only local filesystem directories and archive paths are accepted. Installed names, registry references, OCI references, and URLs are not resolved yet.
+Local filesystem directories, local archive paths, and public GitHub agent-directory URLs are accepted. For GitHub, zot downloads the repository archive into a temporary directory, selects the requested agent subdirectory, validates it, runs it, and removes the downloaded files when the command exits:
+
+```bash
+zot run https://github.com/patriceckhart/agents/zot-maintenance --cwd /path/to/zot
+```
+
+Both the short subdirectory form above and a standard GitHub tree URL are supported:
+
+```bash
+zot run https://github.com/patriceckhart/agents/tree/main/zot-maintenance
+```
+
+The short form reads the repository's default branch through GitHub's `HEAD` archive. A tree URL uses the branch or tag in the URL. Private repositories and GitHub references containing `/` are not currently supported. The downloaded source is temporary, but normal agent data, consent receipts, and session transcripts remain under `$ZOT_HOME`.
+
+Installed names, arbitrary URLs, registry references, and OCI references are not resolved yet.
 
 ### `zot pack`
 
@@ -519,6 +533,7 @@ Packing validates the manifest and directory, then creates a zstd-compressed tar
 ```bash
 zot inspect ./my-agent
 zot inspect ./my-agent.zot
+zot inspect https://github.com/patriceckhart/agents/zot-maintenance
 ```
 
 Inspection validates and prints the agent's name, version, description, digest, declared permissions, and complete file list. It does not execute the agent.
@@ -558,11 +573,12 @@ Archive extraction rejects absolute paths and parent traversal. Unsupported tar 
 7. Inspect and verify the final archive, not only its source directory.
 8. Do not claim that network, environment, signatures, extensions, installation, or registry delivery are secured or supported by the local runtime.
 
-## Current scope and roadmap
+## Current scope
 
 Implemented now:
 
 - local directories and `.zot` archives
+- temporary execution of agent directories from public GitHub repositories
 - `zot pack`, `zot inspect`, `zot verify`, and `zot run`
 - canonical tar creation with zstd compression
 - archive digest reporting and safe extraction limits
@@ -579,8 +595,7 @@ Implemented now:
 Not implemented yet:
 
 - `zot install`, `zot agents`, `zot use`, `zot update`, or `zot publish`
-- installed-name, URL, OCI, or zot.sh index resolution
-- signatures, signer identity, namespace ownership, or transparency history
+- installed-name, arbitrary URL, OCI, or zot.sh index resolution
 - network allowlist enforcement
 - environment-variable filtering
 - safely confined bundled executable extensions
