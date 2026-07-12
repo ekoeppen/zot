@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,12 +77,12 @@ func runZotfileCommand(rawArgs []string, version string) (bool, error) {
 		return true, zotPack(dir, out)
 	case "inspect":
 		if len(rawArgs) < 2 {
-			return true, fmt.Errorf("zot inspect requires a .zot file or directory")
+			return true, fmt.Errorf("zot inspect requires a .zot file, directory, or GitHub URL")
 		}
 		return true, zotInspect(rawArgs[1])
 	case "verify":
 		if len(rawArgs) < 2 {
-			return true, fmt.Errorf("zot verify requires a .zot file or directory")
+			return true, fmt.Errorf("zot verify requires a .zot file, directory, or GitHub URL")
 		}
 		zf, cleanup, err := loadZotfile(rawArgs[1])
 		if cleanup != nil {
@@ -93,7 +95,7 @@ func runZotfileCommand(rawArgs []string, version string) (bool, error) {
 		return true, nil
 	case "run":
 		if len(rawArgs) < 2 {
-			return true, fmt.Errorf("zot run requires a .zot file or directory")
+			return true, fmt.Errorf("zot run requires a .zot file, directory, or GitHub URL")
 		}
 		ref := rawArgs[1]
 		rest := rawArgs[2:]
@@ -316,6 +318,9 @@ func zotPack(dir, out string) error {
 }
 
 func loadZotfile(ref string) (zotfileLoaded, func(), error) {
+	if u, err := url.Parse(ref); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
+		return loadRemoteZotfile(u)
+	}
 	info, err := os.Stat(ref)
 	if err != nil {
 		return zotfileLoaded{}, nil, err
@@ -351,6 +356,130 @@ func loadZotfile(ref string) (zotfileLoaded, func(), error) {
 		return zotfileLoaded{}, nil, err
 	}
 	return zotfileLoaded{Dir: tmp, Temp: true, Digest: digest, Manifest: m}, cleanup, nil
+}
+
+var zotfileHTTPClient = &http.Client{Timeout: 60 * time.Second}
+
+var githubArchiveURL = func(owner, repo, ref string) string {
+	return fmt.Sprintf("https://github.com/%s/%s/archive/%s.tar.gz", owner, repo, url.PathEscape(ref))
+}
+
+func loadRemoteZotfile(u *url.URL) (zotfileLoaded, func(), error) {
+	if !strings.EqualFold(u.Hostname(), "github.com") {
+		return zotfileLoaded{}, nil, fmt.Errorf("unsupported zotfile URL host %q; only github.com agent directories are supported", u.Hostname())
+	}
+	owner, repo, ref, subdir, err := parseGitHubAgentURL(u)
+	if err != nil {
+		return zotfileLoaded{}, nil, err
+	}
+	tmp, err := os.MkdirTemp("", "zotfile-github-*")
+	if err != nil {
+		return zotfileLoaded{}, nil, err
+	}
+	cleanup := func() { _ = os.RemoveAll(tmp) }
+	if err := downloadGitHubArchive(githubArchiveURL(owner, repo, ref), tmp); err != nil {
+		cleanup()
+		return zotfileLoaded{}, nil, err
+	}
+	root, err := singleExtractedRoot(tmp)
+	if err != nil {
+		cleanup()
+		return zotfileLoaded{}, nil, err
+	}
+	dir := filepath.Join(root, filepath.FromSlash(subdir))
+	if subdir == "" {
+		dir = root
+	}
+	if !pathWithin(root, dir) {
+		cleanup()
+		return zotfileLoaded{}, nil, fmt.Errorf("unsafe GitHub agent path %q", subdir)
+	}
+	m, err := readZotManifest(dir)
+	if err != nil {
+		cleanup()
+		return zotfileLoaded{}, nil, fmt.Errorf("GitHub agent %s/%s/%s: %w", owner, repo, subdir, err)
+	}
+	if err := validateZotfileDir(dir); err != nil {
+		cleanup()
+		return zotfileLoaded{}, nil, err
+	}
+	return zotfileLoaded{Dir: dir, Temp: true, Digest: digestDirectory(dir), Manifest: m}, cleanup, nil
+}
+
+func parseGitHubAgentURL(u *url.URL) (owner, repo, ref, subdir string, err error) {
+	parts := strings.Split(strings.Trim(u.EscapedPath(), "/"), "/")
+	for i := range parts {
+		parts[i], err = url.PathUnescape(parts[i])
+		if err != nil {
+			return "", "", "", "", fmt.Errorf("invalid GitHub URL path: %w", err)
+		}
+	}
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", "", "", fmt.Errorf("GitHub agent URL must include an owner and repository")
+	}
+	owner, repo, ref = parts[0], strings.TrimSuffix(parts[1], ".git"), "HEAD"
+	if len(parts) >= 4 && parts[2] == "tree" {
+		ref = parts[3]
+		subdir = strings.Join(parts[4:], "/")
+	} else {
+		subdir = strings.Join(parts[2:], "/")
+	}
+	if repo == "" || ref == "" {
+		return "", "", "", "", fmt.Errorf("invalid GitHub agent URL")
+	}
+	clean := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(filepath.FromSlash(subdir))), "./")
+	if clean == "." {
+		clean = ""
+	}
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", "", "", "", fmt.Errorf("unsafe GitHub agent path %q", subdir)
+	}
+	return owner, repo, ref, clean, nil
+}
+
+func downloadGitHubArchive(archiveURL, dst string) error {
+	req, err := http.NewRequest(http.MethodGet, archiveURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "zot")
+	resp, err := zotfileHTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("download GitHub repository: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download GitHub repository: HTTP %d", resp.StatusCode)
+	}
+	limited := &io.LimitedReader{R: resp.Body, N: maxZotfileCompressedSize + 1}
+	gr, err := gzip.NewReader(limited)
+	if err != nil {
+		return fmt.Errorf("read GitHub archive: %w", err)
+	}
+	defer gr.Close()
+	if err := untar(gr, dst); err != nil {
+		return fmt.Errorf("extract GitHub archive: %w", err)
+	}
+	if limited.N <= 0 {
+		return fmt.Errorf("GitHub archive exceeds %d MiB compressed size limit", maxZotfileCompressedSize>>20)
+	}
+	return nil
+}
+
+func pathWithin(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func singleExtractedRoot(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	if len(entries) != 1 || !entries[0].IsDir() {
+		return "", fmt.Errorf("GitHub archive has an unexpected layout")
+	}
+	return filepath.Join(dir, entries[0].Name()), nil
 }
 
 func readZotManifest(dir string) (ZotfileManifest, error) {

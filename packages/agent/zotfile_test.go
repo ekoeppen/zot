@@ -3,6 +3,10 @@ package agent
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,6 +101,77 @@ func TestUntarRejectsTraversalAndOversizedEntry(t *testing.T) {
 	}
 	if err := untar(bytes.NewReader(makeTar("large", maxZotfileEntrySize+1)), t.TempDir()); err == nil {
 		t.Fatal("oversized entry accepted")
+	}
+}
+
+func TestParseGitHubAgentURL(t *testing.T) {
+	tests := []struct {
+		input                 string
+		owner, repo, ref, dir string
+	}{
+		{"https://github.com/patriceckhart/agents/zot-maintenance", "patriceckhart", "agents", "HEAD", "zot-maintenance"},
+		{"https://github.com/patriceckhart/agents/tree/main/zot-maintenance", "patriceckhart", "agents", "main", "zot-maintenance"},
+		{"https://github.com/acme/agent.git", "acme", "agent", "HEAD", ""},
+	}
+	for _, tt := range tests {
+		u, err := url.Parse(tt.input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		owner, repo, ref, dir, err := parseGitHubAgentURL(u)
+		if err != nil {
+			t.Fatalf("parse %s: %v", tt.input, err)
+		}
+		if owner != tt.owner || repo != tt.repo || ref != tt.ref || dir != tt.dir {
+			t.Fatalf("parse %s = %q, %q, %q, %q", tt.input, owner, repo, ref, dir)
+		}
+	}
+}
+
+func TestLoadRemoteZotfileDownloadsTemporaryGitHubArchive(t *testing.T) {
+	var archive bytes.Buffer
+	gz := gzip.NewWriter(&archive)
+	tw := tar.NewWriter(gz)
+	files := map[string]string{
+		"agents-main/zot-maintenance/manifest.json": `{"zotfile":1,"name":"zot-maintenance"}`,
+		"agents-main/zot-maintenance/AGENT.md":      "Maintain zot.",
+	}
+	for name, content := range files {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: int64(len(content))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		_, _ = w.Write(archive.Bytes())
+	}))
+	defer server.Close()
+	oldArchiveURL := githubArchiveURL
+	githubArchiveURL = func(_, _, _ string) string { return server.URL }
+	t.Cleanup(func() { githubArchiveURL = oldArchiveURL })
+
+	u, _ := url.Parse("https://github.com/patriceckhart/agents/zot-maintenance")
+	zf, cleanup, err := loadRemoteZotfile(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if zf.Manifest.Name != "zot-maintenance" || !zf.Temp {
+		t.Fatalf("unexpected zotfile: %+v", zf)
+	}
+	root := filepath.Dir(filepath.Dir(zf.Dir))
+	cleanup()
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("temporary checkout was not removed: %v", err)
 	}
 }
 
