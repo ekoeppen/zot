@@ -64,8 +64,9 @@ skill ecosystem works in zot unchanged. Drop your existing
 `.claude/skills/` or `.agents/skills/` directories into a project and
 zot will pick them up.
 
-`$ZOT_HOME` defaults to `~/Library/Application Support/zot/` on macOS,
-`$XDG_STATE_HOME/zot` on Linux, `%LOCALAPPDATA%\zot` on Windows.
+When `XDG_STATE_HOME` is set on any platform, `$ZOT_HOME` defaults to
+`$XDG_STATE_HOME/zot`. Otherwise it defaults to `~/Library/Application Support/zot/`
+on macOS, `~/.local/state/zot` on Linux, or `%LOCALAPPDATA%\zot` on Windows.
 
 ## Inspecting installed skills
 

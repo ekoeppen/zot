@@ -97,8 +97,9 @@ zot scans two directories on startup, in this order:
 2. **Global**: `$ZOT_HOME/extensions/<name>/extension.json`
 
 A project-local extension with the same name wins over a global one.
-On macOS `$ZOT_HOME` defaults to `~/Library/Application Support/zot/`;
-on Linux it's `$XDG_STATE_HOME/zot` or `~/.local/state/zot`.
+When `XDG_STATE_HOME` is set on any platform, `$ZOT_HOME` defaults to
+`$XDG_STATE_HOME/zot`. Otherwise it defaults to `~/Library/Application Support/zot/`
+on macOS, `~/.local/state/zot` on Linux, or `%LOCALAPPDATA%\zot` on Windows.
 
 Because each extension owns its own directory, the recommended place
 for extension state is inside that directory itself (for example

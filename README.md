@@ -3,6 +3,12 @@
     <img src="packages/provider/auth/assets/zot-logo.png" alt="zot coding agent harness" width="130" height="130" />
   </a>
 </div>
+<br>
+<p align="center">
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <img alt="Go 1.25+" src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white">
+  <img alt="30+ providers" src="https://img.shields.io/badge/providers-30+-34E2EA">
+</p>
 <p align="center">
   <a href="https://www.zot.sh">zot.sh</a>
 </p>
@@ -73,9 +79,10 @@ The easiest way is to just run `zot` and type `/login`. The TUI opens even witho
 3. `$ZOT_HOME/auth.json` (API key or OAuth token; mode 0600)
 
 `$ZOT_HOME` defaults to:
-- macOS: `~/Library/Application Support/zot`
-- Linux: `$XDG_STATE_HOME/zot` or `~/.local/state/zot`
-- Windows: `%LOCALAPPDATA%\zot`
+- All platforms: `$XDG_STATE_HOME/zot` when `XDG_STATE_HOME` is set
+- macOS fallback: `~/Library/Application Support/zot`
+- Linux fallback: `~/.local/state/zot`
+- Windows fallback: `%LOCALAPPDATA%\zot`
 
 ### `/login` flow
 
@@ -392,7 +399,7 @@ No configuration is required — the candidate list is built dynamically from yo
 
 ### Custom models
 
-Place a `models.json` in `$ZOT_HOME` (macOS: `~/Library/Application Support/zot/`, Linux: `~/.local/state/zot/`) to add models that aren't in the baked-in catalog or to override existing entries:
+Place a `models.json` in `$ZOT_HOME` (`$XDG_STATE_HOME/zot/` when set, otherwise the platform default above) to add models that aren't in the baked-in catalog or to override existing entries:
 
 ```json
 {
