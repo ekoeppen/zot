@@ -35,12 +35,13 @@ func chatCompletionsURL(baseURL string) string {
 }
 
 type openaiClient struct {
-	apiKey  string
-	baseURL string
-	name    string
-	oauth   bool // when true, apiKey actually holds an OAuth access token
-	headers map[string]string
-	http    *http.Client
+	apiKey              string
+	baseURL             string
+	chatCompletionsPath string
+	name                string
+	oauth               bool // when true, apiKey actually holds an OAuth access token
+	headers             map[string]string
+	http                *http.Client
 }
 
 // NewOpenAI creates an OpenAI client using an API key. baseURL may be empty.
@@ -431,8 +432,15 @@ func buildOAIContentBlocks(blocks []Content, isError bool) []interface{} {
 
 // ---- streaming ----
 
+func (c *openaiClient) chatCompletionsURL() string {
+	if c.chatCompletionsPath != "" {
+		return strings.TrimRight(c.baseURL, "/") + "/" + strings.TrimLeft(c.chatCompletionsPath, "/")
+	}
+	return chatCompletionsURL(c.baseURL)
+}
+
 func (c *openaiClient) Stream(ctx context.Context, req Request) (<-chan Event, error) {
-	endpoint := chatCompletionsURL(c.baseURL)
+	endpoint := c.chatCompletionsURL()
 	wire, err := c.buildRequest(req)
 	if err != nil {
 		return nil, err

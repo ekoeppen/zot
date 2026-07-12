@@ -38,3 +38,15 @@ func TestChatCompletionsURL(t *testing.T) {
 		})
 	}
 }
+
+func TestGithubCopilotChatCompletionsURL(t *testing.T) {
+	client, ok := NewGithubCopilotClient("test-token").(*openaiClient)
+	if !ok {
+		t.Fatal("NewGithubCopilotClient did not return an openaiClient")
+	}
+
+	const want = "https://api.individual.githubcopilot.com/chat/completions"
+	if got := client.chatCompletionsURL(); got != want {
+		t.Errorf("GitHub Copilot chat completions URL = %q, want %q", got, want)
+	}
+}
