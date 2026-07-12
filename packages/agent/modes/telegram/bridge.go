@@ -44,12 +44,13 @@ type Bridge struct {
 	Save   func(Config) error
 	Host   Host
 
-	mu       sync.Mutex
-	running  bool
-	cancel   context.CancelFunc
-	me       *User
-	chatID   int64 // populated after first DM from the paired user
-	replyBuf strings.Builder
+	mu            sync.Mutex
+	running       bool
+	cancel        context.CancelFunc
+	me            *User
+	chatID        int64 // populated after first DM from the paired user
+	replyBuf      strings.Builder
+	workingCancel context.CancelFunc
 
 	// nextReplyFromTelegram is set when the next assistant reply
 	// should be sent bare (no "zot: " prefix) because the turn was
@@ -140,9 +141,14 @@ func (b *Bridge) Start(parent context.Context) error {
 func (b *Bridge) Stop() {
 	b.mu.Lock()
 	cancel := b.cancel
+	workingCancel := b.workingCancel
 	b.running = false
 	b.cancel = nil
+	b.workingCancel = nil
 	b.mu.Unlock()
+	if workingCancel != nil {
+		workingCancel()
+	}
 	if cancel != nil {
 		cancel()
 	}
@@ -160,11 +166,16 @@ func (b *Bridge) OnAssistantText(text string) {
 	b.mu.Lock()
 	// prefix := "zot: "
 	prefix := ""
+	workingCancel := b.workingCancel
+	b.workingCancel = nil
 	if b.nextReplyFromTelegram {
 		prefix = ""
 		b.nextReplyFromTelegram = false
 	}
 	b.mu.Unlock()
+	if workingCancel != nil {
+		workingCancel()
+	}
 	b.sendToPaired(text, prefix)
 }
 
@@ -176,6 +187,47 @@ func (b *Bridge) OnAssistantText(text string) {
 // own bubble), only TUI-originated prompts flow through here.
 func (b *Bridge) OnUserTyped(text string) {
 	b.sendToPaired(text, "you: ")
+}
+
+// indicateWorking keeps Telegram's typing indicator visible while a turn
+// submitted from Telegram is waiting or running. Telegram clears chat actions
+// after a few seconds, so refresh it until the reply is ready or the bridge
+// stops.
+func (b *Bridge) indicateWorking(ctx context.Context, chatID int64) {
+	workingCtx, cancel := context.WithCancel(ctx)
+
+	b.mu.Lock()
+	previous := b.workingCancel
+	b.workingCancel = cancel
+	b.mu.Unlock()
+	if previous != nil {
+		previous()
+	}
+
+	go func() {
+		ticker := time.NewTicker(4 * time.Second)
+		defer ticker.Stop()
+		for {
+			_ = b.Client.SendChatAction(workingCtx, chatID, "typing")
+			select {
+			case <-workingCtx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+// stopWorking clears the local typing-indicator refresh loop. Telegram removes
+// the visible indicator itself when the next message arrives or it expires.
+func (b *Bridge) stopWorking() {
+	b.mu.Lock()
+	cancel := b.workingCancel
+	b.workingCancel = nil
+	b.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // sendToPaired writes text (with an optional prefix, chunked to
@@ -342,12 +394,14 @@ func (b *Bridge) handleUpdate(ctx context.Context, u Update) {
 		return
 	case "/stop":
 		b.Host.CancelTurn()
+		b.stopWorking()
 		_ = b.Client.SendMessage(ctx, msg.Chat.ID,
 			"cancelled the current turn.", msg.MessageID)
 		return
 	}
 	if isStopCommand(text) {
 		b.Host.CancelTurn()
+		b.stopWorking()
 		_ = b.Client.SendMessage(ctx, msg.Chat.ID,
 			"cancelled the current turn.", msg.MessageID)
 		return
@@ -382,6 +436,7 @@ func (b *Bridge) handleUpdate(ctx context.Context, u Update) {
 	b.mu.Lock()
 	b.nextReplyFromTelegram = true
 	b.mu.Unlock()
+	b.indicateWorking(ctx, msg.Chat.ID)
 	b.Host.SubmitOrQueue(prompt, images)
 }
 
