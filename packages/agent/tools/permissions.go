@@ -34,6 +34,11 @@ func (p PermissionSet) Expand(workspace, agentData string) PermissionSet {
 		}
 		return s
 	}
+	// Clone the slices before expanding them. PermissionSet is copied by value,
+	// but slices otherwise still alias the manifest and repeated expansion (for
+	// example after /cd) would mutate the original declaration.
+	p.FS.Read = append([]string(nil), p.FS.Read...)
+	p.FS.Write = append([]string(nil), p.FS.Write...)
 	for i, v := range p.FS.Read {
 		p.FS.Read[i] = expand(v)
 	}
@@ -54,8 +59,11 @@ func (s *Sandbox) CheckReadPath(path string) error {
 	if err := s.CheckPath(path); err != nil {
 		return err
 	}
-	if s == nil || s.Permissions == nil || len(s.Permissions.FS.Read) == 0 {
+	if s == nil || s.Permissions == nil {
 		return nil
+	}
+	if len(s.Permissions.FS.Read) == 0 {
+		return fmt.Errorf("permission denied: this agent has no filesystem read permission")
 	}
 	return checkScopedPath("read", path, s.Permissions.FS.Read)
 }
@@ -64,8 +72,11 @@ func (s *Sandbox) CheckWritePath(path string) error {
 	if err := s.CheckPath(path); err != nil {
 		return err
 	}
-	if s == nil || s.Permissions == nil || len(s.Permissions.FS.Write) == 0 {
+	if s == nil || s.Permissions == nil {
 		return nil
+	}
+	if len(s.Permissions.FS.Write) == 0 {
+		return fmt.Errorf("permission denied: this agent has no filesystem write permission")
 	}
 	return checkScopedPath("write", path, s.Permissions.FS.Write)
 }
@@ -99,15 +110,20 @@ func (s *Sandbox) CheckBashPermission(cmd string) error {
 	case "none":
 		return fmt.Errorf("permission denied: this agent has no bash permission")
 	case "ask":
+		// The local runtime obtains explicit consent for this capability at
+		// every launch. Unlike durable consent, ask mode is never cached.
 		return nil
 	case "allowlist":
+		if strings.ContainsAny(cmd, "`\n\r<>") || strings.Contains(cmd, "$(") {
+			return fmt.Errorf("permission denied: bash allowlist does not permit substitution or redirection")
+		}
 		names := commandNames(cmd)
 		if len(names) == 0 {
 			return fmt.Errorf("permission denied: empty command")
 		}
 		allowed := map[string]bool{}
 		for _, name := range s.Permissions.Bash.Allow {
-			allowed[name] = true
+			allowed[filepath.Base(strings.TrimSpace(name))] = true
 		}
 		for _, name := range names {
 			if !allowed[name] {
