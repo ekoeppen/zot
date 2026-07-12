@@ -61,7 +61,7 @@ Config files are loaded from two locations (project overrides global per-server)
 
 | Location | Scope |
 |---|---|
-| `$ZOT_HOME/mcp.json` | Global (macOS: `~/Library/Application Support/zot/mcp.json`) |
+| `$ZOT_HOME/mcp.json` | Global (`$XDG_STATE_HOME/zot/mcp.json` when `XDG_STATE_HOME` is set) |
 | `.zot/mcp.json` | Project-level (in your project root) |
 
 ### Config Format

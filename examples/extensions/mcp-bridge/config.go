@@ -3,7 +3,7 @@
 // Reads standard MCP config files (same format as Claude Desktop, Cursor, etc.)
 // from two locations:
 //
-//  1. Global:  $ZOT_HOME/mcp.json  (macOS: ~/Library/Application Support/zot/mcp.json)
+//  1. Global:  $ZOT_HOME/mcp.json
 //  2. Project: .zot/mcp.json       (in the current working directory)
 //
 // Project config overrides global config per-server (shallow merge).
