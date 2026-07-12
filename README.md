@@ -3,6 +3,12 @@
     <img src="packages/provider/auth/assets/zot-logo.png" alt="zot coding agent harness" width="130" height="130" />
   </a>
 </div>
+<br>
+<p align="center">
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <img alt="Go 1.25+" src="https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white">
+  <img alt="30+ providers" src="https://img.shields.io/badge/providers-30+-34E2EA">
+</p>
 <p align="center">
   <a href="https://www.zot.sh">zot.sh</a>
 </p>
