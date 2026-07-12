@@ -26,6 +26,7 @@ Yet another coding agent harness, lightweight and written (vibe-slopped) in go.
 - user and extension themes via JSON; see [docs/themes.md](docs/themes.md).
 - standing instructions via `AGENTS.md` files (global and per-project); see [Persistent instructions](#persistent-instructions-agentsmd).
 - reusable instructions via `SKILL.md` files; see [docs/skills.md](docs/skills.md).
+- portable local agents packaged as `.zot` files; see [docs/zotfiles.md](docs/zotfiles.md).
 
 ## Install
 
