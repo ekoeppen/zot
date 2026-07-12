@@ -58,7 +58,7 @@ type Config struct {
 	AppendSystemPrompt []string
 
 	// Reasoning sets the reasoning effort for models that support it
-	// ("low", "medium", "high"). Empty = no reasoning.
+	// ("minimum", "low", "medium", "high", "xhigh", "max"). Empty disables it.
 	Reasoning string
 
 	// Temperature sets the sampling temperature. Nil = provider default.
@@ -296,6 +296,23 @@ func (r *Runtime) SetModel(model string) error {
 	return nil
 }
 
+// SetReasoning changes the thinking level used by subsequent prompts.
+func (r *Runtime) SetReasoning(level string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.agent == nil {
+		return fmt.Errorf("sdk: no agent")
+	}
+	reasoning := provider.NormalizeReasoning(level)
+	switch reasoning {
+	case "", "minimum", "low", "medium", "high", "xhigh", "max":
+		r.agent.Reasoning = reasoning
+		return nil
+	default:
+		return fmt.Errorf("sdk: reasoning must be off|minimum|low|medium|high|xhigh|max")
+	}
+}
+
 // State returns a snapshot of the runtime's current state. Useful for
 // driving UIs.
 func (r *Runtime) State() State {
@@ -304,6 +321,7 @@ func (r *Runtime) State() State {
 	return State{
 		Provider:     r.provider,
 		Model:        r.model,
+		Reasoning:    r.agent.Reasoning,
 		CWD:          r.cwd,
 		Busy:         r.activeCancel != nil,
 		MessageCount: len(r.Messages()),

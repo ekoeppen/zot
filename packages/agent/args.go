@@ -211,10 +211,10 @@ func ParseArgs(in []string) (Args, error) {
 				return a, err
 			}
 			switch strings.ToLower(v) {
-			case "", "off", "minimum", "minimal", "low", "medium", "high", "maximum", "max":
+			case "", "off", "minimum", "minimal", "low", "medium", "high", "xhigh", "maximum", "max":
 				a.Reasoning = strings.ToLower(v)
 			default:
-				return a, fmt.Errorf("--reasoning must be off|minimum|low|medium|high|maximum")
+				return a, fmt.Errorf("--reasoning must be off|minimum|low|medium|high|xhigh|max")
 			}
 		case "--temperature":
 			v, err := want(&i, arg)
@@ -387,7 +387,7 @@ func PrintHelp(version string) {
 		row{"--api-key KEY", "api key for this run (env / auth.json fallback)"},
 		row{"--base-url URL", "override provider api base url"},
 		row{"--insecure", "skip TLS certificate verification (for self-signed-cert endpoints)"},
-		row{"--reasoning off|minimum|low|medium|high|maximum", "set thinking level on supported models"},
+		row{"--reasoning off|minimum|low|medium|high|xhigh|max", "set thinking level on supported models"},
 		row{"--temperature N", "sampling temperature, 0 to 2 (omit for provider default)"},
 	)
 	section("prompt and session flags",

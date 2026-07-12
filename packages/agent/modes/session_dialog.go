@@ -68,9 +68,9 @@ func (d *sessionDialog) CursorPos() (row, col int) {
 	if !d.renaming {
 		return -1, -1
 	}
-	// Row: frameHeader(1) + rename hint(1) = row 2 (0-indexed)
-	// Col: 2 spaces indent + text length
-	return 2, 2 + len([]rune(d.rename))
+	// Row: frameHeader + padDialogFrame blank + rename hint = row 3 (0-indexed).
+	// Col: "  ▌ " prefix + text length.
+	return 3, 4 + len([]rune(d.rename))
 }
 
 // Close hides the dialog.
@@ -93,8 +93,14 @@ func (d *sessionDialog) Render(th tui.Theme, width int) []string {
 		return lines
 	}
 	if d.renaming {
-		lines = append(lines, th.FG256(th.Muted, "rename session (enter to save, esc to cancel):"))
-		lines = append(lines, "  "+th.FG256(th.FG, d.rename))
+		lines = append(lines, th.FG256(th.Muted, "rename session (enter save, esc cancel):"))
+		text := d.rename
+		if text == "" {
+			text = th.FG256(th.Muted, "session name")
+		} else {
+			text = th.FG256(th.FG, text)
+		}
+		lines = append(lines, "  "+th.FG256(th.Accent, "▌ ")+text)
 		lines = append(lines, frameRule(th, width))
 		return lines
 	}

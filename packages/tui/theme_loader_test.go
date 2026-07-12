@@ -34,6 +34,25 @@ func TestLoadThemeAllowsPartialColorOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadThemeAllowsThinkingMaxOverride(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "themes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, "themes", "thinking.json")
+	if err := os.WriteFile(path, []byte(`{"colors":{"dark":{"thinkingMax":201}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	th, _, err := LoadThemeFromHome(home, "thinking", Dark)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if th.ThinkingMax != 201 {
+		t.Fatalf("thinking max = %d, want 201", th.ThinkingMax)
+	}
+}
+
 func TestLoadThemeAllowsSpinnerOnlyTopLevelOverrides(t *testing.T) {
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, "themes"), 0o755); err != nil {

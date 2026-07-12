@@ -94,6 +94,7 @@ type Usage struct {
 type State struct {
 	Provider     string `json:"provider"`
 	Model        string `json:"model"`
+	Reasoning    string `json:"reasoning"`
 	CWD          string `json:"cwd"`
 	Busy         bool   `json:"busy"`
 	MessageCount int    `json:"message_count"`

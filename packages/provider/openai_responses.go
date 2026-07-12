@@ -48,6 +48,13 @@ func (t *openaiResponsesTransport) RoundTrip(req *http.Request) (*http.Response,
 //
 // baseURL may be empty; defaults to https://api.openai.com/v1/responses.
 func NewOpenAIResponses(apiKey, baseURL string) Client {
+	return NewOpenAIResponsesNamed(apiKey, baseURL, "openai-responses")
+}
+
+// NewOpenAIResponsesNamed returns a public OpenAI Responses-API client
+// reporting the supplied provider name. This lets the `openai` provider
+// route Responses-only preview models without changing the visible provider.
+func NewOpenAIResponsesNamed(apiKey, baseURL, name string) Client {
 	if baseURL == "" {
 		baseURL = openaiResponsesDefaultBaseURL
 	}
@@ -56,10 +63,12 @@ func NewOpenAIResponses(apiKey, baseURL string) Client {
 		Timeout:   0,
 	}
 	inner := &codexClient{
-		token:     apiKey,
-		accountID: "", // unused; transport strips the header
-		baseURL:   strings.TrimRight(baseURL, "/"),
-		http:      httpClient,
+		token:        apiKey,
+		accountID:    "", // unused; transport strips the header
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		errorLabel:   "openai",
+		providerName: name,
+		http:         httpClient,
 	}
-	return &renamedClient{inner: inner, name: "openai-responses"}
+	return &renamedClient{inner: inner, name: name}
 }

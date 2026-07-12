@@ -413,7 +413,7 @@ func geminiThinkingConfig(modelID, level string) *gemThinkingConfig {
 			} else {
 				lvl = "MEDIUM"
 			}
-		case "high", "maximum":
+		case "high", "xhigh", "max":
 			lvl = "HIGH"
 		default:
 			return nil

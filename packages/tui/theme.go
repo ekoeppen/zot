@@ -49,6 +49,7 @@ type Theme struct {
 	Error        int
 	Warning      int
 	Spinner      int // spinner + funny working line
+	ThinkingMax  int // status color for the opt-in max thinking level
 	SelectionBG  int // background for highlighted rows
 	SelectionFG  int // foreground for highlighted rows
 
@@ -159,6 +160,7 @@ var Dark = Theme{
 	Error:             203,
 	Warning:           214,
 	Spinner:           183, // soft purple
+	ThinkingMax:       207, // vivid magenta
 	SelectionBG:       24,  // deep blue background
 	SelectionFG:       231, // near-white foreground
 	SpinnerFrames:     defaultSpinnerFrames,
@@ -181,6 +183,7 @@ var Light = Theme{
 	Error:             160,
 	Warning:           166,
 	Spinner:           91,  // purple
+	ThinkingMax:       127, // deep magenta
 	SelectionBG:       153, // light blue
 	SelectionFG:       232, // near-black
 	SpinnerFrames:     defaultSpinnerFrames,

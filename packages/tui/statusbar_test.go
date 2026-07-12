@@ -85,12 +85,26 @@ func TestStatusBarThinkingLevelBetweenModelAndStats(t *testing.T) {
 	}
 }
 
+func TestStatusBarUsesThinkingMaxThemeColor(t *testing.T) {
+	th := Dark
+	th.ThinkingMax = 201
+	lines := StatusBar(StatusBarParams{
+		Theme: th, Provider: "openai", Model: "gpt-5.6-sol", Reasoning: "max", Cols: 200,
+	})
+	if len(lines) != 1 {
+		t.Fatalf("lines = %d, want 1", len(lines))
+	}
+	if !strings.Contains(lines[0], "\x1b[38;5;201m") || !strings.Contains(stripANSI(lines[0]), "thinking: max") {
+		t.Fatalf("max thinking style missing: %q", lines[0])
+	}
+}
+
 func TestStatusBarNarrowKeepsModelAndThinkingTogetherWhenTheyFit(t *testing.T) {
 	lines := StatusBar(StatusBarParams{
 		Theme:     Dark,
 		Provider:  "openai-codex",
 		Model:     "gpt-5.5",
-		Reasoning: "maximum",
+		Reasoning: "xhigh",
 		CWD:       "/tmp/x",
 		Usage: provider.Usage{
 			CostUSD: 0,
@@ -107,7 +121,7 @@ func TestStatusBarNarrowKeepsModelAndThinkingTogetherWhenTheyFit(t *testing.T) {
 	for i, line := range lines {
 		plain[i] = stripANSI(line)
 	}
-	if !strings.Contains(plain[0], "(openai-codex) gpt-5.5  thinking: maximum") {
+	if !strings.Contains(plain[0], "(openai-codex) gpt-5.5  thinking: xhigh") {
 		t.Fatalf("line 1 should contain model and thinking level, got %q", plain[0])
 	}
 	if !strings.Contains(plain[1], "$0.000 (sub)") || strings.Contains(plain[1], "thinking level") {

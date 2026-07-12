@@ -153,6 +153,16 @@ Switch model within the same provider.
 
 Cross-provider swaps require relaunching `zot rpc` with the new `--provider`.
 
+### `set_reasoning`
+
+Set the thinking level for subsequent prompts without restarting the process. Accepted values are `off`, `minimum`, `low`, `medium`, `high`, `xhigh`, and `max`.
+
+```json
+{"id":"8","type":"set_reasoning","reasoning":"max"}
+```
+
+The `max` tier is sent natively to supported models and clamped for other backends.
+
 ### `get_models`
 
 List models known for the current provider.

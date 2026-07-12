@@ -162,12 +162,16 @@ zot --provider cloudflare-workers-ai
 ```bash
 export AZURE_OPENAI_API_KEY=...
 export AZURE_OPENAI_BASE_URL=https://your-resource.openai.azure.com
-export AZURE_OPENAI_API_VERSION=2024-02-01 # optional
+export AZURE_OPENAI_API_VERSION=v1 # optional, v1 is the default
 zot --provider azure-openai-responses
 ```
 
-If your Azure deployment names differ from zot model IDs, add model overrides
-in `$ZOT_HOME/models.json`.
+The provider uses Azure's Responses API. If deployment names differ from zot
+model IDs, map them without changing the catalog:
+
+```bash
+export AZURE_OPENAI_DEPLOYMENT_NAME_MAP='gpt-5.6-luna=luna-preview,gpt-5.6-sol=sol-preview'
+```
 
 ## Auth file
 

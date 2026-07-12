@@ -118,6 +118,19 @@ func TestAnthropicAdaptiveThinking(t *testing.T) {
 		t.Fatalf("want effort=xhigh, got %+v", wire.OutputConfig)
 	}
 
+	// max is a separate native tier above xhigh on adaptive models.
+	wire, err = c.buildRequest(Request{
+		Model:     "claude-opus-4-8",
+		Reasoning: "max",
+		Messages:  []Message{{Role: RoleUser, Content: []Content{TextBlock{Text: "hi"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wire.OutputConfig == nil || wire.OutputConfig.Effort != "max" {
+		t.Fatalf("want effort=max, got %+v", wire.OutputConfig)
+	}
+
 	// Sonnet 5 -> adaptive thinking, effort set, no budget, no temperature.
 	wire, err = c.buildRequest(Request{
 		Model:       "claude-sonnet-5",
@@ -382,6 +395,43 @@ func TestDiscoverOpenRouter(t *testing.T) {
 	// context falls back to top_provider; no reasoning.
 	if m := models[1]; m.ContextWindow != 128000 || m.MaxOutput != 0 || m.Reasoning {
 		t.Errorf("model[1]: %+v", m)
+	}
+}
+
+func TestGPT56CatalogEntries(t *testing.T) {
+	cases := []struct {
+		provider   string
+		id         string
+		context    int
+		priceInput float64
+		priceOut   float64
+		cacheRead  float64
+		cacheWrite float64
+	}{
+		{"openai", "gpt-5.6-luna", 272000, 1, 6, 0.1, 1.25},
+		{"openai", "gpt-5.6-sol", 272000, 5, 30, 0.5, 6.25},
+		{"openai", "gpt-5.6-terra", 272000, 2.5, 15, 0.25, 3.125},
+		{"openai-codex", "gpt-5.6-luna", 372000, 1, 6, 0.1, 1.25},
+		{"openai-codex", "gpt-5.6-sol", 372000, 5, 30, 0.5, 6.25},
+		{"openai-codex", "gpt-5.6-terra", 372000, 2.5, 15, 0.25, 3.125},
+		{"azure-openai-responses", "gpt-5.6-luna", 1050000, 1, 6, 0.1, 1.25},
+		{"azure-openai-responses", "gpt-5.6-sol", 1050000, 5, 30, 0.5, 6.25},
+		{"azure-openai-responses", "gpt-5.6-terra", 1050000, 2.5, 15, 0.25, 3.125},
+		{"vercel-ai-gateway", "openai/gpt-5.6-luna", 1050000, 1, 6, 0.1, 1.25},
+		{"vercel-ai-gateway", "openai/gpt-5.6-sol", 1050000, 5, 30, 0.5, 6.25},
+		{"vercel-ai-gateway", "openai/gpt-5.6-terra", 1050000, 2.5, 15, 0.25, 3.125},
+	}
+	for _, tc := range cases {
+		m, err := FindModel(tc.provider, tc.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.ContextWindow != tc.context || m.MaxOutput != 128000 || !m.Reasoning {
+			t.Fatalf("%s/%s limits: %+v", tc.provider, tc.id, m)
+		}
+		if m.PriceInput != tc.priceInput || m.PriceOutput != tc.priceOut || m.PriceCacheRead != tc.cacheRead || m.PriceCacheWrite != tc.cacheWrite {
+			t.Fatalf("%s/%s prices: %+v", tc.provider, tc.id, m)
+		}
 	}
 }
 

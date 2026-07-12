@@ -3,7 +3,9 @@ package provider
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,10 +38,14 @@ import (
 const codexDefaultBaseURL = "https://chatgpt.com/backend-api/codex/responses"
 
 type codexClient struct {
-	token     string
-	accountID string
-	baseURL   string
-	http      *http.Client
+	token             string
+	accountID         string
+	baseURL           string
+	errorLabel        string
+	providerName      string
+	modelName         func(string) string
+	disableCLIRouting bool
+	http              *http.Client
 }
 
 // NewOpenAICodex creates a client that talks to ChatGPT's Codex endpoint
@@ -50,10 +56,12 @@ func NewOpenAICodex(token, accountID, baseURL string) Client {
 		baseURL = codexDefaultBaseURL
 	}
 	return &codexClient{
-		token:     token,
-		accountID: accountID,
-		baseURL:   strings.TrimRight(baseURL, "/"),
-		http:      &http.Client{Timeout: 0},
+		token:        token,
+		accountID:    accountID,
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		errorLabel:   "codex",
+		providerName: "openai-codex",
+		http:         &http.Client{Timeout: 0},
 	}
 }
 
@@ -146,6 +154,7 @@ type codexRequest struct {
 	ParallelToolCalls bool                  `json:"parallel_tool_calls"`
 	Include           []string              `json:"include,omitempty"`
 	Reasoning         *codexReasoningConfig `json:"reasoning,omitempty"`
+	PromptCacheKey    string                `json:"prompt_cache_key,omitempty"`
 }
 
 // ---- Request building ----
@@ -169,7 +178,7 @@ func (c *codexClient) buildRequest(req Request) (*codexRequest, error) {
 		Include:           []string{"reasoning.encrypted_content"},
 	}
 	if m.Reasoning {
-		if effort := OpenAICodexReasoningEffort(req.Reasoning); effort != "" {
+		if effort := OpenAICodexReasoningEffort(req.Reasoning, req.Model); effort != "" {
 			body.Reasoning = &codexReasoningConfig{Effort: effort}
 		}
 	}
@@ -310,12 +319,43 @@ func splitCallID(id string) (string, string) {
 	return id, ""
 }
 
+func usesCodexCLIRouting(model string) bool {
+	switch model {
+	case "gpt-5.6-luna", "gpt-5.6-luna-pro", "gpt-5.6-terra", "gpt-5.6-terra-pro":
+		return true
+	default:
+		return false
+	}
+}
+
+func newCodexSessionID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("zot-%d", time.Now().UnixNano())
+	}
+	return strings.Join([]string{
+		hex.EncodeToString(b[0:4]),
+		hex.EncodeToString(b[4:6]),
+		hex.EncodeToString(b[6:8]),
+		hex.EncodeToString(b[8:10]),
+		hex.EncodeToString(b[10:16]),
+	}, "-")
+}
+
 // ---- Streaming ----
 
 func (c *codexClient) Stream(ctx context.Context, req Request) (<-chan Event, error) {
 	wire, err := c.buildRequest(req)
 	if err != nil {
 		return nil, err
+	}
+	if c.modelName != nil {
+		wire.Model = c.modelName(wire.Model)
+	}
+	var codexCLISessionID string
+	if !c.disableCLIRouting && usesCodexCLIRouting(wire.Model) {
+		codexCLISessionID = newCodexSessionID()
+		wire.PromptCacheKey = codexCLISessionID
 	}
 	body, err := json.Marshal(wire)
 	if err != nil {
@@ -332,8 +372,17 @@ func (c *codexClient) Stream(ctx context.Context, req Request) (<-chan Event, er
 		httpReq.Header.Set("authorization", "Bearer "+c.token)
 		httpReq.Header.Set("chatgpt-account-id", c.accountID)
 		httpReq.Header.Set("openai-beta", "responses=experimental")
-		httpReq.Header.Set("originator", "zot")
-		httpReq.Header.Set("user-agent", fmt.Sprintf("zot (%s %s)", runtime.GOOS, runtime.GOARCH))
+		if codexCLISessionID != "" {
+			// Some preview models are only admitted or reliably served by the
+			// ChatGPT Codex backend when the request follows Codex CLI routing
+			// metadata. Keep this narrow so Sol retains zot's proven shape.
+			httpReq.Header.Set("originator", "codex_cli_rs")
+			httpReq.Header.Set("session-id", codexCLISessionID)
+			httpReq.Header.Set("user-agent", "codex_cli_rs/0.0.0")
+		} else {
+			httpReq.Header.Set("originator", "zot")
+			httpReq.Header.Set("user-agent", fmt.Sprintf("zot (%s %s)", runtime.GOOS, runtime.GOARCH))
+		}
 		return httpReq, nil
 	}
 
@@ -360,7 +409,11 @@ func (c *codexClient) runStream(ctx context.Context, resp *http.Response, req Re
 	if model.ID == "" {
 		model, _ = FindModel("openai", req.Model)
 	}
-	out <- EventStart{Model: req.Model, Provider: "openai-codex"}
+	providerName := c.providerName
+	if providerName == "" {
+		providerName = "openai-codex"
+	}
+	out <- EventStart{Model: req.Model, Provider: providerName}
 
 	raw := make(chan sseEvent, 16)
 	go readSSE(resp.Body, raw)
@@ -596,14 +649,31 @@ func (c *codexClient) runStream(ctx context.Context, resp *http.Response, req Re
 				var p struct {
 					Message string `json:"message"`
 					Code    string `json:"code"`
+					Error   struct {
+						Message string `json:"message"`
+						Code    string `json:"code"`
+					} `json:"error"`
 				}
 				_ = json.Unmarshal([]byte(ev.Data), &p)
 				msg := p.Message
 				if msg == "" {
+					msg = p.Error.Message
+				}
+				if msg == "" {
 					msg = p.Code
 				}
+				if msg == "" {
+					msg = p.Error.Code
+				}
+				if msg == "" {
+					msg = strings.TrimSpace(ev.Data)
+				}
 				stop = StopError
-				finalErr = fmt.Errorf("codex error: %s", msg)
+				label := c.errorLabel
+				if label == "" {
+					label = "codex"
+				}
+				finalErr = fmt.Errorf("%s error: %s", label, msg)
 				sendDone()
 				return
 			}

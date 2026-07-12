@@ -1,6 +1,11 @@
 package provider
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -59,5 +64,158 @@ func TestCodexImageToolResultMirror(t *testing.T) {
 	}
 	if !sawInputImage {
 		t.Fatalf("mirrored user image was not serialized as input_image")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestCodexPreviewModelUsesCodexCLIShape(t *testing.T) {
+	c := NewOpenAICodex("token", "acct", "https://example.test/backend-api/codex/responses").(*codexClient)
+	var gotReq *http.Request
+	var gotBody codexRequest
+	c.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		gotReq = r
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatal(err)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader("")),
+		}, nil
+	})
+
+	events, err := c.Stream(context.Background(), Request{
+		Model:    "gpt-5.6-terra",
+		Messages: []Message{{Role: RoleUser, Content: []Content{TextBlock{Text: "hi"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range events {
+	}
+
+	if gotReq == nil {
+		t.Fatal("request was not sent")
+	}
+	if gotReq.Header.Get("originator") != "codex_cli_rs" {
+		t.Fatalf("originator = %q", gotReq.Header.Get("originator"))
+	}
+	if gotReq.Header.Get("user-agent") != "codex_cli_rs/0.0.0" {
+		t.Fatalf("user-agent = %q", gotReq.Header.Get("user-agent"))
+	}
+	if gotBody.PromptCacheKey == "" {
+		t.Fatal("prompt_cache_key was not set")
+	}
+	if gotReq.Header.Get("session-id") != gotBody.PromptCacheKey {
+		t.Fatalf("session-id = %q, prompt_cache_key = %q", gotReq.Header.Get("session-id"), gotBody.PromptCacheKey)
+	}
+}
+
+func TestGPT56UsesNativeMaxReasoningEffort(t *testing.T) {
+	c := NewOpenAICodex("token", "acct", "").(*codexClient)
+	wire, err := c.buildRequest(Request{Model: "gpt-5.6-sol", Reasoning: "max"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wire.Reasoning == nil || wire.Reasoning.Effort != "max" {
+		t.Fatalf("reasoning = %+v", wire.Reasoning)
+	}
+}
+
+func TestOpenAIGPT56DoesNotUseCodexCLIRouting(t *testing.T) {
+	named := NewOpenAIResponsesNamed("token", "https://example.test/v1/responses", "openai").(*renamedClient)
+	c := named.inner.(*codexClient)
+	var gotReq *http.Request
+	var gotBody codexRequest
+	c.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		gotReq = r
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatal(err)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader("")),
+		}, nil
+	})
+
+	events, err := c.Stream(context.Background(), Request{
+		Model:    "gpt-5.6-sol",
+		Messages: []Message{{Role: RoleUser, Content: []Content{TextBlock{Text: "hi"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range events {
+	}
+
+	if gotReq == nil {
+		t.Fatal("request was not sent")
+	}
+	if gotReq.Header.Get("session-id") != "" {
+		t.Fatalf("session-id = %q", gotReq.Header.Get("session-id"))
+	}
+	if gotBody.PromptCacheKey != "" {
+		t.Fatalf("prompt_cache_key = %q", gotBody.PromptCacheKey)
+	}
+}
+
+func TestCodexNestedStreamError(t *testing.T) {
+	c := NewOpenAICodex("token", "acct", "").(*codexClient)
+	resp := &http.Response{
+		Body: io.NopCloser(strings.NewReader("data: {\"type\":\"error\",\"error\":{\"code\":\"model_not_available\",\"message\":\"limited preview\"}}\n\n")),
+	}
+	out := make(chan Event, 16)
+	go c.runStream(context.Background(), resp, Request{Model: "gpt-5.6-sol"}, out)
+
+	var got error
+	for ev := range out {
+		if done, ok := ev.(EventDone); ok {
+			got = done.Err
+		}
+	}
+	if got == nil || got.Error() != "codex error: limited preview" {
+		t.Fatalf("error = %v", got)
+	}
+}
+
+func TestCodexSolKeepsZotShape(t *testing.T) {
+	c := NewOpenAICodex("token", "acct", "https://example.test/backend-api/codex/responses").(*codexClient)
+	var gotReq *http.Request
+	var body bytes.Buffer
+	c.http.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		gotReq = r
+		_, _ = body.ReadFrom(r.Body)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader("")),
+		}, nil
+	})
+
+	events, err := c.Stream(context.Background(), Request{
+		Model:    "gpt-5.6-sol",
+		Messages: []Message{{Role: RoleUser, Content: []Content{TextBlock{Text: "hi"}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range events {
+	}
+
+	if gotReq == nil {
+		t.Fatal("request was not sent")
+	}
+	if gotReq.Header.Get("originator") != "zot" {
+		t.Fatalf("originator = %q", gotReq.Header.Get("originator"))
+	}
+	if gotReq.Header.Get("session-id") != "" {
+		t.Fatalf("session-id = %q", gotReq.Header.Get("session-id"))
+	}
+	if strings.Contains(body.String(), "prompt_cache_key") {
+		t.Fatalf("Sol request unexpectedly included prompt_cache_key: %s", body.String())
 	}
 }

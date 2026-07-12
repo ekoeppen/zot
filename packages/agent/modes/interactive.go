@@ -1532,6 +1532,12 @@ func (i *Interactive) redraw() {
 			cursorCol = c
 		}
 	}
+	if i.sessionTreeDialog.Active() {
+		if r, c := i.sessionTreeDialog.CursorPos(); r >= 0 {
+			cursorRow = dialogLead + r
+			cursorCol = c
+		}
+	}
 	if i.swarmDialog.Active() {
 		if r, c := i.swarmDialog.CursorPos(cols); r >= 0 {
 			cursorRow = dialogLead + r
@@ -1961,7 +1967,7 @@ func (i *Interactive) handleKey(ctx context.Context, k tui.Key) (done bool) {
 		}
 		act := i.sessionTreeDialog.HandleKey(k)
 		if act.Select {
-			i.applySessionTreeSelection(act.Path)
+			i.applySessionTreeMessageSelection(act.Path, act.MessageIdx, act.TurnNo, act.Role, act.Prompt)
 		}
 		i.invalidate()
 		return false
@@ -2921,7 +2927,8 @@ func (i *Interactive) openSettingsDialog() {
 		{value: "low", label: "low", desc: "light (~2k tokens)"},
 		{value: "medium", label: "medium", desc: "moderate (~8k tokens)"},
 		{value: "high", label: "high", desc: "deep (~16k tokens)"},
-		{value: "maximum", label: "maximum", desc: "highest (~32k tokens)"},
+		{value: "xhigh", label: "xhigh", desc: "extra-high effort"},
+		{value: "max", label: "max", desc: "unconstrained effort on supported models"},
 	}
 	reasoning := provider.NormalizeReasoning(i.cfg.Reasoning)
 	reasoningChoice := 0
@@ -6138,62 +6145,89 @@ func (i *Interactive) doSessionFork() {
 	i.invalidate()
 }
 
-// doSessionTree shows the branch topology picker for this cwd.
-// Pick an entry to switch into it (same semantics as /sessions
-// picking a past session, but with the parent/child indentation).
+// doSessionTree shows the current session family as an inline branch tree.
+// Pick an entry to check out that point into a new branch. Subsequent
+// prompts use only context up to the selected message.
 func (i *Interactive) doSessionTree() {
-	if i.cfg.ZotHome == "" || i.cfg.CWD == "" {
-		i.mu.Lock()
-		i.statusErr = "tree: session storage not configured"
-		i.mu.Unlock()
-		i.invalidate()
-		return
-	}
-	// Flush the running agent's transcript first so its message
-	// count + latest preview are accurate in the tree.
-	if i.cfg.FlushSession != nil {
-		i.cfg.FlushSession()
-	}
-	roots := core.BuildSessionTree(i.cfg.ZotHome, i.cfg.CWD)
-	if len(roots) == 0 {
-		i.mu.Lock()
-		i.statusErr = "tree: no sessions in this directory yet"
-		i.mu.Unlock()
-		i.invalidate()
-		return
-	}
 	current := ""
 	if i.cfg.CurrentSessionPath != nil {
 		current = i.cfg.CurrentSessionPath()
 	}
-	if !i.sessionTreeDialog.Open(roots, current) {
+	if current != "" && i.sessionTreeDialog.OpenSessionFamily(i.cfg.ZotHome, i.cfg.CWD, current) {
+		i.invalidate()
+		return
+	}
+	msgs := []provider.Message{}
+	if i.agent != nil {
+		msgs = i.agent.Messages()
+	}
+	if len(msgs) == 0 {
 		i.mu.Lock()
-		i.statusErr = "tree: no branches to show"
+		i.statusErr = "tree: no messages in this session yet"
+		i.mu.Unlock()
+		i.invalidate()
+		return
+	}
+	if !i.sessionTreeDialog.OpenMessages(msgs) {
+		i.mu.Lock()
+		i.statusErr = "tree: no messages to show"
 		i.mu.Unlock()
 	}
 	i.invalidate()
 }
 
-// applySessionTreeSelection switches the running agent to the
-// session file at path. Thin wrapper around LoadSession that also
-// writes a status line.
-func (i *Interactive) applySessionTreeSelection(path string) {
-	if i.cfg.LoadSession == nil {
+// applySessionTreeMessageSelection checks out the selected message into a
+// new branch, then switches the running agent to that branch. Unlike /jump,
+// this changes future model context: only messages up to the selected row are
+// sent on subsequent turns.
+func (i *Interactive) applySessionTreeMessageSelection(src string, msgIdx, turnNo int, role provider.Role, prompt string) {
+	if i.cfg.CurrentSessionPath == nil || i.cfg.LoadSession == nil {
 		i.mu.Lock()
-		i.statusErr = "tree: session swap not available in this build"
+		i.statusErr = "tree: session branching is not available in this build"
 		i.mu.Unlock()
 		i.invalidate()
 		return
 	}
-	if err := i.cfg.LoadSession(path); err != nil {
+	if src == "" {
+		src = i.cfg.CurrentSessionPath()
+	}
+	if src == "" {
 		i.mu.Lock()
-		i.statusErr = "tree: load failed: " + err.Error()
+		i.statusErr = "tree: no session is active"
 		i.mu.Unlock()
 		i.invalidate()
 		return
 	}
+	if i.cfg.FlushSession != nil {
+		i.cfg.FlushSession()
+	}
+	upTo := msgIdx + 1
+	if role == provider.RoleUser {
+		upTo = msgIdx
+	}
+	newPath, err := core.BranchSessionHidden(src, i.cfg.ZotHome, i.cfg.CWD, i.cfg.Version, upTo)
+	if err != nil {
+		i.mu.Lock()
+		i.statusErr = "tree: " + err.Error()
+		i.mu.Unlock()
+		i.invalidate()
+		return
+	}
+	if err := i.cfg.LoadSession(newPath); err != nil {
+		i.mu.Lock()
+		i.statusErr = "tree: checkout failed: " + err.Error()
+		i.mu.Unlock()
+		i.invalidate()
+		return
+	}
+	i.scrollToBottom()
 	i.mu.Lock()
-	i.statusOK = "switched to branch " + friendlyPath(path)
+	if role == provider.RoleUser {
+		i.ed.SetValue(prompt)
+		i.statusOK = fmt.Sprintf("checked out before turn %d; edit and send to branch", turnNo)
+	} else {
+		i.statusOK = fmt.Sprintf("checked out turn %d into a new branch", turnNo)
+	}
 	i.statusErr = ""
 	i.mu.Unlock()
 	i.invalidate()

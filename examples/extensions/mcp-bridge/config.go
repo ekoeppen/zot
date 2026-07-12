@@ -3,7 +3,7 @@
 // Reads standard MCP config files (same format as Claude Desktop, Cursor, etc.)
 // from two locations:
 //
-//  1. Global:  $ZOT_HOME/mcp.json  (macOS: ~/Library/Application Support/zot/mcp.json)
+//  1. Global:  $ZOT_HOME/mcp.json
 //  2. Project: .zot/mcp.json       (in the current working directory)
 //
 // Project config overrides global config per-server (shallow merge).
@@ -47,6 +47,9 @@ func zotHome() string {
 	if h := os.Getenv("ZOT_HOME"); h != "" {
 		return h
 	}
+	if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
+		return filepath.Join(xdg, "zot")
+	}
 	switch runtime.GOOS {
 	case "darwin":
 		home, _ := os.UserHomeDir()
@@ -54,9 +57,6 @@ func zotHome() string {
 	case "windows":
 		return filepath.Join(os.Getenv("APPDATA"), "zot")
 	default: // linux, freebsd, etc.
-		if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
-			return filepath.Join(xdg, "zot")
-		}
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, ".local", "state", "zot")
 	}
