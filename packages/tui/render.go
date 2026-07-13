@@ -483,7 +483,7 @@ func (r *Renderer) DrawLog(chat, bottom []string, cursorBottomRow, cursorCol int
 	w.WriteString(SeqSynchronizedOn)
 	w.WriteString(SeqHideCursor)
 
-	writeFull := func(clear bool) {
+	writeFull := func(clear, purgeScrollback bool) {
 		if clear {
 			w.WriteString(SeqDeleteKittyImages)
 			if r.keepScrollback {
@@ -500,7 +500,13 @@ func (r *Renderer) DrawLog(chat, bottom []string, cursorBottomRow, cursorCol int
 				w.WriteString(SeqClearToEnd)
 			} else {
 				w.WriteString(SeqClearScreenNoHome)
-				w.WriteString(r.clearScrollbackSeq())
+				// Purging scrollback invalidates native terminal selections.
+				// It is safe on the first paint because no zot output can be
+				// selected yet, but implicit recovery repaints happen while an
+				// agent is streaming and must preserve the user's selection.
+				if purgeScrollback {
+					w.WriteString(r.clearScrollbackSeq())
+				}
 				w.WriteString(MoveTo(1, 1))
 			}
 		}
@@ -576,9 +582,10 @@ func (r *Renderer) DrawLog(chat, bottom []string, cursorBottomRow, cursorCol int
 	// because the cached entry was the \x00 sentinel rather than the
 	// real previous bg-colored row.
 
-	full := !r.logInit || len(r.logLines) == 0
+	wasInitialized := r.logInit
+	full := !wasInitialized || len(r.logLines) == 0
 	if full {
-		writeFull(true)
+		writeFull(true, !wasInitialized)
 		r.logInit = true
 	} else {
 		firstChanged := -1
@@ -623,7 +630,9 @@ func (r *Renderer) DrawLog(chat, bottom []string, cursorBottomRow, cursorCol int
 			// move the hardware cursor if the editor cursor changed.
 		} else if firstChanged < r.logViewportTop {
 			// Changes above the visible viewport cannot be patched safely.
-			writeFull(true)
+			// Repaint without erasing scrollback: the terminal may have a
+			// native text selection anchored there while output streams.
+			writeFull(true, false)
 		} else {
 			prevViewportTop := r.logViewportTop
 			viewportTop := prevViewportTop
@@ -686,7 +695,7 @@ func (r *Renderer) DrawLog(chat, bottom []string, cursorBottomRow, cursorCol int
 			if len(r.logLines) > len(lines) {
 				extra := len(r.logLines) - len(lines)
 				if extra > r.rows {
-					writeFull(true)
+					writeFull(true, false)
 				} else {
 					for e := 0; e < extra; e++ {
 						w.WriteString("\x1b[1B")
