@@ -190,9 +190,10 @@ func NewGithubCopilotClient(pat string) Client {
 	// Initial baseURL is a sane default; copilotRefreshTransport rewrites
 	// the host on every request based on the freshly-issued token.
 	return &openaiClient{
-		apiKey:  pat, // unused at the wire level (transport overrides Auth) but kept for parity
-		baseURL: "https://api.individual.githubcopilot.com",
-		name:    "github-copilot",
-		http:    httpClient,
+		apiKey:              pat, // unused at the wire level (transport overrides Auth) but kept for parity
+		baseURL:             "https://api.individual.githubcopilot.com",
+		chatCompletionsPath: "/chat/completions",
+		name:                "github-copilot",
+		http:                httpClient,
 	}
 }

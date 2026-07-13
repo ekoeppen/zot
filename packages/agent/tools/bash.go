@@ -52,6 +52,9 @@ func (t *BashTool) Execute(ctx context.Context, raw json.RawMessage, progress fu
 	if err := t.Sandbox.CheckCommand(a.Command); err != nil {
 		return core.ToolResult{}, err
 	}
+	if err := t.Sandbox.CheckBashPermission(a.Command); err != nil {
+		return core.ToolResult{}, err
+	}
 	cwd := t.CWD
 	if cwd == "" {
 		cwd, _ = os.Getwd()

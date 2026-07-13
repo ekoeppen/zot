@@ -15,8 +15,9 @@ import (
 // The value is designed to be shared across tool instances (by pointer).
 // Enable/Disable are atomic so they can be toggled from the TUI.
 type Sandbox struct {
-	Root   string
-	locked atomic.Bool
+	Root        string
+	Permissions *PermissionSet
+	locked      atomic.Bool
 }
 
 // NewSandbox returns a Sandbox rooted at cwd. It starts unlocked.

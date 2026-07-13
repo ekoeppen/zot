@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/alecthomas/chroma/v2 v2.23.1
 	github.com/google/uuid v1.6.0
+	github.com/klauspost/compress v1.19.0
 	github.com/mattn/go-runewidth v0.0.16
 	github.com/sahilm/fuzzy v0.1.1
 	golang.org/x/image v0.43.0

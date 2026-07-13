@@ -528,6 +528,9 @@ func Resolve(args Args, requireCred bool) (Resolved, error) {
 	}
 
 	sandbox := tools.NewSandbox(args.CWD)
+	if args.PermissionSet != nil {
+		sandbox.SetPermissions(args.PermissionSet)
+	}
 	reg := buildToolRegistry(args, args.CWD, sandbox)
 
 	docsDir, _ := zotdocs.EnsureInstalled(ZotHome())
@@ -876,6 +879,9 @@ func (r Resolved) wrapWithRefresh(inner provider.Client) provider.Client {
 func (r *Resolved) UseSandbox(s *tools.Sandbox) {
 	if s == nil || r == nil {
 		return
+	}
+	if r.Sandbox != nil && r.Sandbox.Permissions != nil {
+		s.Permissions = r.Sandbox.Permissions
 	}
 	r.Sandbox = s
 	for name, t := range r.ToolRegistry {
