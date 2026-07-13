@@ -101,3 +101,45 @@ func TestDrawLogResizeForcesFullRedraw(t *testing.T) {
 		t.Fatal("post-resize redraw skipped; the new frame would never reach the terminal")
 	}
 }
+
+// TestDrawLogRecoveryPreservesScrollbackSelection covers long streaming
+// output whose changing first row has already scrolled above the viewport.
+// DrawLog must repaint in that case, but erasing terminal scrollback also
+// erases the text backing any native mouse selection the user is making.
+func TestDrawLogRecoveryPreservesScrollbackSelection(t *testing.T) {
+	t.Setenv("TERM_PROGRAM", "")
+	var buf bytes.Buffer
+	r := NewRenderer(&buf)
+	r.Resize(80, 3)
+	r.DrawLog([]string{"partial", "line 2", "line 3", "line 4"}, []string{"input"}, 0, 0)
+	buf.Reset()
+
+	// The changed row is above logViewportTop, forcing the recovery repaint
+	// used while a long streamed response continues to be reformatted.
+	r.DrawLog([]string{"partial response", "line 2", "line 3", "line 4"}, []string{"input"}, 0, 0)
+	got := buf.String()
+	if !strings.Contains(got, SeqClearScreenNoHome) {
+		t.Fatalf("recovery path did not repaint the screen: %q", got)
+	}
+	if strings.Contains(got, SeqClearScrollback) {
+		t.Fatalf("recovery repaint erased scrollback and native selection: %q", got)
+	}
+}
+
+// TestDrawLogInvalidationPreservesScrollbackSelection pins the same rule for
+// cache invalidations, which can happen during an active turn independently
+// of an inaccessible changed row.
+func TestDrawLogInvalidationPreservesScrollbackSelection(t *testing.T) {
+	t.Setenv("TERM_PROGRAM", "")
+	var buf bytes.Buffer
+	r := NewRenderer(&buf)
+	r.Resize(80, 3)
+	r.DrawLog([]string{"one", "two", "three", "four"}, []string{"input"}, 0, 0)
+	buf.Reset()
+
+	r.Invalidate()
+	r.DrawLog([]string{"one", "two", "three", "four"}, []string{"input"}, 0, 0)
+	if got := buf.String(); strings.Contains(got, SeqClearScrollback) {
+		t.Fatalf("invalidation repaint erased scrollback and native selection: %q", got)
+	}
+}
