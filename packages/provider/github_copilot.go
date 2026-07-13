@@ -175,6 +175,7 @@ func (t *copilotRefreshTransport) RoundTrip(req *http.Request) (*http.Response, 
 		if u, err := url.Parse(tok.baseURL); err == nil && u.Host != clone.URL.Host {
 			clone.URL.Scheme = u.Scheme
 			clone.URL.Host = u.Host
+			clone.Host = u.Host
 		}
 	}
 	return t.inner.RoundTrip(clone)
