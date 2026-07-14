@@ -1292,10 +1292,6 @@ func renderSwarmTranscriptBlocks(lines []string, th tui.Theme, width int, compac
 	// inner width is width-4 for markdown and width-2 for the
 	// user-bubble (the bubble already pads itself).
 	var out []string
-	innerMD := width - 4
-	if innerMD < 20 {
-		innerMD = 20
-	}
 	bubbleWidth := width - 2
 	if bubbleWidth < 10 {
 		bubbleWidth = 10
@@ -1311,20 +1307,14 @@ func renderSwarmTranscriptBlocks(lines []string, th tui.Theme, width int, compac
 			out = append(out, btwUserBubbleRows(th, text, bubbleWidth, compactMode)...)
 		case kindAssistant:
 			text := strings.Join(b.body, "\n")
-			md := tui.RenderMarkdown(strings.TrimLeft(text, "\n"), th, innerMD)
-			for _, line := range strings.Split(md, "\n") {
-				if len(line) > 0 && line[0] == tui.FlushLeftSentinel {
-					line = line[1:]
-				}
-				out = append(out, "    "+line)
-			}
+			out = append(out, renderDialogMarkdownRows(strings.TrimLeft(text, "\n"), th, width)...)
 		case kindStderr:
 			for _, line := range b.body {
-				out = append(out, "    "+th.FG256(th.Muted, "stderr  "+line))
+				out = append(out, wrapDialogTextRows(th.FG256(th.Muted, "stderr  "+line), width)...)
 			}
 		case kindError:
 			for _, line := range b.body {
-				out = append(out, "    "+th.FG256(th.Error, "✖ "+line))
+				out = append(out, wrapDialogTextRows(th.FG256(th.Error, "✖ "+line), width)...)
 			}
 		}
 	}

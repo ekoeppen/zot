@@ -330,16 +330,10 @@ func (d *btwDialog) Render(th tui.Theme, width int) []string {
 		out = append(out, btwUserBubbleRows(th, t.User, width-2, d.compactMode)...)
 		if t.Assistant != "" {
 			out = append(out, "")
-			md := tui.RenderMarkdown(t.Assistant, th, width-4)
-			for _, line := range strings.Split(md, "\n") {
-				if len(line) > 0 && line[0] == tui.FlushLeftSentinel {
-					line = line[1:]
-				}
-				out = append(out, "    "+line)
-			}
+			out = append(out, renderDialogMarkdownRows(t.Assistant, th, width)...)
 		}
 		if t.Err != "" {
-			out = append(out, "    "+th.FG256(th.Error, "✖ "+t.Err))
+			out = append(out, wrapDialogTextRows(th.FG256(th.Error, "✖ "+t.Err), width)...)
 		}
 	}
 
@@ -405,10 +399,10 @@ func (d *btwDialog) CursorPos(width int) (row, col int) {
 		editorOffset += len(btwUserBubbleRows(d.theme, t.User, width-2, d.compactMode))
 		if t.Assistant != "" {
 			editorOffset++ // blank
-			editorOffset += len(strings.Split(tui.RenderMarkdown(t.Assistant, d.theme, width-4), "\n"))
+			editorOffset += len(renderDialogMarkdownRows(t.Assistant, d.theme, width))
 		}
 		if t.Err != "" {
-			editorOffset++
+			editorOffset += len(wrapDialogTextRows(d.theme.FG256(d.theme.Error, "✖ "+t.Err), width))
 		}
 	}
 	if d.loading {
