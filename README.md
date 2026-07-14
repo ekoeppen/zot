@@ -546,13 +546,41 @@ Credential lookup order for Google:
 
 Use `/login` and pick **api key** to paste an AI Studio key. zot probes `/v1beta/models` once and stores the key under `google` in `auth.json`.
 
-> **Auth model: API key only.** Google does not issue OAuth tokens for consumer Gemini Advanced / Google One AI Premium subscriptions, so there is no "log in with your Google subscription" flow. Programmatic access requires either an AI Studio API key (this provider) or a Vertex AI / GCP service-account credential (not yet wired up in zot). The `/login subscription` step quietly downgrades to the api-key form when you pick Google so you don't end up in a dead end.
+> **Auth model: API key only (this provider).** Google does not issue OAuth tokens for consumer Gemini Advanced / Google One AI Premium subscriptions, so there is no "log in with your Google subscription" flow. The `/login subscription` step quietly downgrades to the api-key form when you pick Google so you don't end up in a dead end. If you need OAuth/service-account auth instead of an API key, use the `google-vertex` provider below.
 
 > **Free-tier rate limits.** AI Studio's free tier has tight per-minute and per-day caps that vary by model: `gemini-2.5-pro` is the strictest (a few requests per minute, ~50 per day), Flash and Flash-Lite are far more generous. If a Pro turn 429s with `"You exceeded your current quota"` while Flash on the same key still works, you've hit the Pro free-tier RPD. Either switch to Flash for agent loops, or [enable billing](https://aistudio.google.com/app/apikey) on your AI Studio project to flip the same key from free to pay-as-you-go pricing (`$1.25/M` input, `$10/M` output for Pro).
 
 Reasoning levels (`--reasoning off|minimum|low|medium|high|xhigh|max`, also configurable in `/settings` as **thinking level**) map differently per generation. `max` is a distinct opt-in tier above `xhigh`. GPT-5.6 and adaptive-thinking Claude models receive native `max`; unsupported providers clamp it to their highest accepted effort. Budget-based providers retain their provider/model caps. Gemini 3.x uses the `thinkingLevel` enum (`MINIMAL`/`LOW`/`MEDIUM`/`HIGH`), with Gemini-3-Pro pinned to `LOW` minimum and `HIGH` for any medium-or-higher request. `off` sends no reasoning config. Gemini 2.0 models have no thinking config.
 
 You can add additional Gemini model IDs to `models.json` under the `google` provider.
+
+### Gemini Enterprise Agent Platform (formerly Google Vertex AI)
+
+zot also has built-in support for [Gemini Enterprise Agent Platform](https://cloud.google.com/products/gemini-enterprise-agent-platform), Google's enterprise/GCP-hosted Gemini endpoint. Unlike the AI Studio `google` provider above, the `google-vertex` provider supports a Google Cloud API key plus `service_account` and `authorized_user` credential files. It does not support consumer Google login or the complete ADC credential chain, such as metadata-server and workload-identity credentials.
+
+```bash
+zot --provider google-vertex
+```
+
+Required configuration (env vars, read at construction time):
+
+- `GOOGLE_CLOUD_PROJECT` — required, your GCP project id.
+- `GOOGLE_CLOUD_LOCATION` — optional, defaults to `us-central1`.
+
+Credential lookup order for Vertex:
+
+1. `GOOGLE_CLOUD_API_KEY`: simplest option. An API key created in the GCP console is sent as `x-goog-api-key`, without a token exchange.
+2. `GOOGLE_APPLICATION_CREDENTIALS`: path to a supported credential JSON file.
+3. **Default ADC file**: if neither of the above is set, zot checks the file written by `gcloud auth application-default login`. This is `~/.config/gcloud/application_default_credentials.json` on Unix systems and `%APPDATA%\gcloud\application_default_credentials.json` on Windows.
+
+Two credential file shapes are supported:
+
+- `type: "service_account"`: zot signs a JWT with the private key and exchanges it for a short-lived access token.
+- `type: "authorized_user"`: zot exchanges the stored client ID, client secret, and refresh token for a short-lived access token.
+
+Access tokens are cached in memory and refreshed on demand.
+
+If none of these are available, zot errors with `vertex: no auth — set GOOGLE_CLOUD_API_KEY or GOOGLE_APPLICATION_CREDENTIALS`.
 
 ### Local models with ollama
 
