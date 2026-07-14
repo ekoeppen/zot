@@ -554,9 +554,9 @@ Reasoning levels (`--reasoning off|minimum|low|medium|high|xhigh|max`, also conf
 
 You can add additional Gemini model IDs to `models.json` under the `google` provider.
 
-### Google Enterprise Agent Platform (formerly Google Vertex AI)
+### Gemini Enterprise Agent Platform (formerly Google Vertex AI)
 
-zot also has built-in support for [Google Enterprise Agent Platform](https://cloud.google.com/products/gemini-enterprise-agent-platform), Google's enterprise/GCP-hosted Gemini endpoint. Unlike the AI Studio `google` provider above, Google Enterprise Agent Platform supports Google Cloud service-account and Application Default Credentials (ADC) auth in addition to a plain API key — no consumer Google login, but full GCP-style credential support.
+zot also has built-in support for [Gemini Enterprise Agent Platform](https://cloud.google.com/products/gemini-enterprise-agent-platform), Google's enterprise/GCP-hosted Gemini endpoint. Unlike the AI Studio `google` provider above, the `google-vertex` provider supports a Google Cloud API key plus `service_account` and `authorized_user` credential files. It does not support consumer Google login or the complete ADC credential chain, such as metadata-server and workload-identity credentials.
 
 ```bash
 zot --provider google-vertex
@@ -569,11 +569,16 @@ Required configuration (env vars, read at construction time):
 
 Credential lookup order for Vertex:
 
-1. `GOOGLE_CLOUD_API_KEY` — simplest option; an API key created in the GCP console, sent as `x-goog-api-key`. Used directly, no token exchange.
-2. `GOOGLE_APPLICATION_CREDENTIALS` — path to a service-account JSON key. zot signs a JWT with the key's private key and exchanges it at `https://oauth2.googleapis.com/token` for a short-lived (1h) access token, cached in memory and refreshed on demand.
-3. **Default ADC file** — if neither of the above is set, zot falls back to `~/.config/gcloud/application_default_credentials.json`, i.e. whatever `gcloud auth application-default login` produced. Both credential shapes found there are supported:
-   - `type: "service_account"` — same JWT/token-exchange flow as above.
-   - `type: "authorized_user"` — the user-OAuth shape gcloud writes; zot reads the `client_id`/`client_secret`/`refresh_token` and exchanges the refresh token for an access token, with the same caching/refresh behavior.
+1. `GOOGLE_CLOUD_API_KEY`: simplest option. An API key created in the GCP console is sent as `x-goog-api-key`, without a token exchange.
+2. `GOOGLE_APPLICATION_CREDENTIALS`: path to a supported credential JSON file.
+3. **Default ADC file**: if neither of the above is set, zot checks the file written by `gcloud auth application-default login`. This is `~/.config/gcloud/application_default_credentials.json` on Unix systems and `%APPDATA%\gcloud\application_default_credentials.json` on Windows.
+
+Two credential file shapes are supported:
+
+- `type: "service_account"`: zot signs a JWT with the private key and exchanges it for a short-lived access token.
+- `type: "authorized_user"`: zot exchanges the stored client ID, client secret, and refresh token for a short-lived access token.
+
+Access tokens are cached in memory and refreshed on demand.
 
 If none of these are available, zot errors with `vertex: no auth — set GOOGLE_CLOUD_API_KEY or GOOGLE_APPLICATION_CREDENTIALS`.
 

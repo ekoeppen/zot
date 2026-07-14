@@ -51,6 +51,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	providerauth "github.com/patriceckhart/zot/packages/provider/auth"
 )
 
 type vertexConfig struct {
@@ -100,8 +102,7 @@ func loadVertexConfig() (*vertexConfig, error) {
 	credPath := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
 	if credPath == "" {
 		// ADC default path. Mirrors `gcloud auth application-default login`.
-		if home, err := os.UserHomeDir(); err == nil {
-			candidate := home + "/.config/gcloud/application_default_credentials.json"
+		if candidate, err := providerauth.GoogleApplicationDefaultCredentialsPath(); err == nil {
 			if _, err := os.Stat(candidate); err == nil {
 				credPath = candidate
 			}

@@ -381,9 +381,8 @@ func ResolveCredentialFull(provider, explicit string) (cred, method, accountID s
 		if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "" {
 			return "<adc>", "apikey", "", nil
 		}
-		// Check for the default ADC path that gcloud writes to
-		if home, err := os.UserHomeDir(); err == nil {
-			adcPath := filepath.Join(home, ".config", "gcloud", "application_default_credentials.json")
+		// Check for the platform-specific default ADC path that gcloud writes to.
+		if adcPath, err := auth.GoogleApplicationDefaultCredentialsPath(); err == nil {
 			if _, err := os.Stat(adcPath); err == nil {
 				return "<adc>", "apikey", "", nil
 			}

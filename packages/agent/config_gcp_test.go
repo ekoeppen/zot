@@ -4,14 +4,28 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	providerauth "github.com/patriceckhart/zot/packages/provider/auth"
 )
+
+func isolateGoogleVertexADC(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("APPDATA", root)
+	path, err := providerauth.GoogleApplicationDefaultCredentialsPath()
+	if err != nil {
+		t.Fatalf("GoogleApplicationDefaultCredentialsPath: %v", err)
+	}
+	return path
+}
 
 // TestResolveCredentialGoogleVertexAPIKey confirms that GOOGLE_CLOUD_API_KEY
 // takes top priority for the google-vertex provider and is returned with
 // method "apikey".
 func TestResolveCredentialGoogleVertexAPIKey(t *testing.T) {
 	t.Setenv("ZOT_HOME", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
+	isolateGoogleVertexADC(t)
 	t.Setenv("GOOGLE_CLOUD_API_KEY", "gcp-key-123")
 	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 
@@ -33,7 +47,7 @@ func TestResolveCredentialGoogleVertexAPIKey(t *testing.T) {
 // the real NewVertex client's ADC-based auth flow.
 func TestResolveCredentialGoogleVertexApplicationCredentialsEnv(t *testing.T) {
 	t.Setenv("ZOT_HOME", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
+	isolateGoogleVertexADC(t)
 	t.Setenv("GOOGLE_CLOUD_API_KEY", "")
 	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "/path/to/service-account.json")
 
@@ -50,21 +64,17 @@ func TestResolveCredentialGoogleVertexApplicationCredentialsEnv(t *testing.T) {
 }
 
 // TestResolveCredentialGoogleVertexDefaultADCFile confirms that, absent any
-// env vars, the presence of the default gcloud ADC file
-// (~/.config/gcloud/application_default_credentials.json) is detected and
-// resolves to the "<adc>" sentinel.
+// env vars, the presence of the platform-specific default gcloud ADC file is
+// detected and resolves to the "<adc>" sentinel.
 func TestResolveCredentialGoogleVertexDefaultADCFile(t *testing.T) {
-	home := t.TempDir()
 	t.Setenv("ZOT_HOME", t.TempDir())
-	t.Setenv("HOME", home)
+	adcPath := isolateGoogleVertexADC(t)
 	t.Setenv("GOOGLE_CLOUD_API_KEY", "")
 	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 
-	adcDir := filepath.Join(home, ".config", "gcloud")
-	if err := os.MkdirAll(adcDir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(adcPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	adcPath := filepath.Join(adcDir, "application_default_credentials.json")
 	if err := os.WriteFile(adcPath, []byte(`{"type":"authorized_user"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -85,17 +95,14 @@ func TestResolveCredentialGoogleVertexDefaultADCFile(t *testing.T) {
 // wins over GOOGLE_APPLICATION_CREDENTIALS and the default ADC file when
 // multiple credential sources are present simultaneously.
 func TestResolveCredentialGoogleVertexPrecedence(t *testing.T) {
-	home := t.TempDir()
 	t.Setenv("ZOT_HOME", t.TempDir())
-	t.Setenv("HOME", home)
+	adcPath := isolateGoogleVertexADC(t)
 	t.Setenv("GOOGLE_CLOUD_API_KEY", "explicit-key")
 	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "/path/to/sa.json")
 
-	adcDir := filepath.Join(home, ".config", "gcloud")
-	if err := os.MkdirAll(adcDir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(adcPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	adcPath := filepath.Join(adcDir, "application_default_credentials.json")
 	if err := os.WriteFile(adcPath, []byte(`{"type":"authorized_user"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -117,9 +124,8 @@ func TestResolveCredentialGoogleVertexPrecedence(t *testing.T) {
 // auth.json entry), resolution fails with an error rather than silently
 // returning an empty credential.
 func TestResolveCredentialGoogleVertexNoCredentials(t *testing.T) {
-	home := t.TempDir()
 	t.Setenv("ZOT_HOME", t.TempDir())
-	t.Setenv("HOME", home)
+	isolateGoogleVertexADC(t)
 	t.Setenv("GOOGLE_CLOUD_API_KEY", "")
 	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 
