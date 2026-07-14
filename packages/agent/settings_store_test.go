@@ -1,0 +1,24 @@
+package agent
+
+import "testing"
+
+func TestConfigSettingsStorePersistsJailByDefault(t *testing.T) {
+	t.Setenv("ZOT_HOME", t.TempDir())
+	if err := SaveConfig(Config{Theme: "dark"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := (configSettingsStore{}).SetJailByDefault(true); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.JailByDefault == nil || !*cfg.JailByDefault {
+		t.Fatal("jail_by_default was not persisted as enabled")
+	}
+	if cfg.Theme != "dark" {
+		t.Fatalf("unrelated config changed: theme = %q, want dark", cfg.Theme)
+	}
+}

@@ -57,6 +57,11 @@ type Config struct {
 	// default; nil/missing means disabled. Toggle from /settings.
 	AutoSwarmEnabled *bool `json:"auto_swarm_enabled,omitempty"`
 
+	// JailByDefault confines tools to the session working directory when
+	// a new agent starts. Off by default; nil/missing means disabled.
+	// The live session can still override this with /jail or /unjail.
+	JailByDefault *bool `json:"jail_by_default,omitempty"`
+
 	// RecursiveFileSuggest controls the @-mention file picker. When true
 	// the picker fuzzy-searches the whole project tree below the working
 	// directory; nil/missing/false keeps the default directory-by-

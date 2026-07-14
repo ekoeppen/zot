@@ -528,6 +528,9 @@ func Resolve(args Args, requireCred bool) (Resolved, error) {
 	}
 
 	sandbox := tools.NewSandbox(args.CWD)
+	if cfg.JailByDefault != nil && *cfg.JailByDefault {
+		sandbox.Lock()
+	}
 	if args.PermissionSet != nil {
 		sandbox.SetPermissions(args.PermissionSet)
 	}

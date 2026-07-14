@@ -48,6 +48,10 @@ type InteractiveConfig struct {
 	// re-reading config.json on every open.
 	AutoSwarmEnabled *bool
 
+	// JailByDefault mirrors the persisted jail_by_default preference.
+	// The current sandbox may differ after a session-scoped /jail or /unjail.
+	JailByDefault *bool
+
 	// RecursiveFileSuggest mirrors the persisted recursive_file_suggest
 	// flag at startup. When true the @-mention picker fuzzy-searches the
 	// whole project tree instead of browsing one directory at a time.
@@ -278,6 +282,7 @@ type SettingsStore interface {
 	SetQuickModelShortcut(slot int, providerName, model string) error
 	SetInlineImages(enabled bool) error
 	SetAutoSwarm(enabled bool) error
+	SetJailByDefault(enabled bool) error
 	SetRecursiveFileSuggest(enabled bool) error
 	SetRespectGitignore(enabled bool) error
 	SetCompactMode(enabled bool) error
@@ -2913,6 +2918,7 @@ func (i *Interactive) openSettingsDialog() {
 		autoSwarmHint = "swarm supervisor not available in this mode"
 	}
 
+	jailByDefault := i.cfg.JailByDefault != nil && *i.cfg.JailByDefault
 	recursiveFiles := i.cfg.RecursiveFileSuggest != nil && *i.cfg.RecursiveFileSuggest
 	respectGitignore := i.cfg.RespectGitignore == nil || *i.cfg.RespectGitignore
 	compactMode := i.compactModeEnabled()
@@ -3020,6 +3026,12 @@ func (i *Interactive) openSettingsDialog() {
 			value:    autoSwarm,
 			disabled: autoSwarmDisabled,
 			hint:     autoSwarmHint,
+		},
+		{
+			key:   "jail_by_default",
+			label: "jail new sessions by default",
+			desc:  "confine tools to the session working directory unless /unjail is used",
+			value: jailByDefault,
 		},
 		{
 			key:   "recursive_file_suggest",
@@ -3330,6 +3342,28 @@ func (i *Interactive) applySettingToggle(key string, value bool) {
 		i.applyAutoSwarmSystemPrompt(value)
 		i.mu.Lock()
 		i.statusOK = "auto-swarm " + onOff(value)
+		i.statusErr = ""
+		i.mu.Unlock()
+	case "jail_by_default":
+		val := value
+		i.cfg.JailByDefault = &val
+		if i.cfg.SettingsStore != nil {
+			if err := i.cfg.SettingsStore.SetJailByDefault(value); err != nil {
+				i.mu.Lock()
+				i.statusErr = "settings: " + err.Error()
+				i.mu.Unlock()
+				return
+			}
+		}
+		if i.cfg.Sandbox != nil {
+			if value {
+				i.cfg.Sandbox.Lock()
+			} else {
+				i.cfg.Sandbox.Unlock()
+			}
+		}
+		i.mu.Lock()
+		i.statusOK = "jail by default " + onOff(value)
 		i.statusErr = ""
 		i.mu.Unlock()
 	case "recursive_file_suggest":

@@ -87,6 +87,35 @@ func TestResolveFallsBackWhenConfiguredModelIsGone(t *testing.T) {
 	}
 }
 
+func TestResolveAppliesJailByDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config Config
+		want   bool
+	}{
+		{name: "missing defaults to unlocked", config: Config{Provider: "openai", Model: "gpt-5"}},
+		{name: "enabled starts locked", config: Config{Provider: "openai", Model: "gpt-5", JailByDefault: boolPtr(true)}, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ZOT_HOME", t.TempDir())
+			t.Setenv("OPENAI_API_KEY", "test-key")
+			if err := SaveConfig(tc.config); err != nil {
+				t.Fatal(err)
+			}
+
+			r, err := Resolve(Args{}, false)
+			if err != nil {
+				t.Fatalf("Resolve failed: %v", err)
+			}
+			if got := r.Sandbox.Locked(); got != tc.want {
+				t.Fatalf("sandbox locked = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func boolPtr(v bool) *bool { return &v }
+
 // TestResolveExplicitFlagStaleDoesNotRepairConfig confirms the
 // repair-on-disk happens ONLY when the stale id came from the
 // persisted config. If the user passed --model X explicitly and X is
