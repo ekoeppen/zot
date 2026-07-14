@@ -28,11 +28,11 @@ type editArgs struct {
 	Edits []editOp `json:"edits"`
 }
 
-const editSchema = `{"type":"object","properties":{"path":{"type":"string"},"edits":{"type":"array","items":{"type":"object","properties":{"oldText":{"type":"string"},"newText":{"type":"string"}},"required":["oldText","newText"]}}},"required":["path","edits"]}`
+const editSchema = `{"type":"object","properties":{"path":{"type":"string","description":"File to modify, given as an absolute path or one relative to the working directory."},"edits":{"type":"array","description":"A set of non-overlapping substitutions, all located in the file content as it existed before this call.","items":{"type":"object","properties":{"oldText":{"type":"string","description":"A verbatim excerpt from the file being modified. Include enough surrounding text to identify exactly one location, without intersecting another edit."},"newText":{"type":"string","description":"Content that will replace the matched excerpt."}},"required":["oldText","newText"]}}},"required":["path","edits"]}`
 
 func (t *EditTool) Name() string { return "edit" }
 func (t *EditTool) Description() string {
-	return "Edit a file via exact-match replacements. Each oldText must be unique in the file."
+	return "Apply exact substitutions to an existing file. Inspect that file before editing and take every oldText directly from its current contents. Use short excerpts that identify one location; choose write when replacing most or all of a file."
 }
 func (t *EditTool) Schema() json.RawMessage { return json.RawMessage(editSchema) }
 
@@ -77,7 +77,7 @@ func (t *EditTool) Execute(ctx context.Context, raw json.RawMessage, progress fu
 		}
 		count := strings.Count(body, e.OldText)
 		if count == 0 {
-			return core.ToolResult{}, fmt.Errorf("edit %d: oldText not found in %s", i+1, a.Path)
+			return core.ToolResult{}, fmt.Errorf("edit %d: oldText not found in %s; inspect that file again and use a verbatim excerpt with matching spaces and line breaks", i+1, a.Path)
 		}
 		if count > 1 {
 			return core.ToolResult{}, fmt.Errorf("edit %d: oldText matches %d times (must be unique) in %s", i+1, count, a.Path)

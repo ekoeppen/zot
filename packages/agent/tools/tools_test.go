@@ -158,6 +158,49 @@ func TestEditAmbiguous(t *testing.T) {
 	}
 }
 
+func TestEditGuidance(t *testing.T) {
+	desc := (&EditTool{}).Description()
+	for _, want := range []string{"Inspect that file", "directly from its current contents", "short excerpts", "write"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("description missing %q: %q", want, desc)
+		}
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal((&EditTool{}).Schema(), &schema); err != nil {
+		t.Fatal(err)
+	}
+	properties := schema["properties"].(map[string]any)
+	edits := properties["edits"].(map[string]any)
+	items := edits["items"].(map[string]any)
+	editProperties := items["properties"].(map[string]any)
+	oldText := editProperties["oldText"].(map[string]any)
+	if got, _ := oldText["description"].(string); !strings.Contains(got, "file being modified") {
+		t.Fatalf("oldText schema description missing target-file guidance: %q", got)
+	}
+}
+
+func TestEditNotFoundGuidesRecovery(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "destination.txt")
+	if err := os.WriteFile(p, []byte("destination content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := &EditTool{CWD: dir}
+	_, err := tool.Execute(context.Background(), mustJSON(t, map[string]any{
+		"path":  "destination.txt",
+		"edits": []map[string]any{{"oldText": "content from another file", "newText": "replacement"}},
+	}), nil)
+	if err == nil {
+		t.Fatal("want oldText not found error")
+	}
+	for _, want := range []string{"oldText not found", "destination.txt", "inspect that file again", "matching spaces and line breaks"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q: %q", want, err)
+		}
+	}
+}
+
 func TestEditPreservesCRLF(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "a.txt")
