@@ -625,14 +625,39 @@ func (r *Renderer) DrawLog(chat, bottom []string, cursorBottomRow, cursorCol int
 			}
 		}
 
+		// Rows that have scrolled above the viewport are immutable terminal
+		// history. Replaying the full logical buffer to update one of them
+		// duplicates that history, and erasing it first destroys native text
+		// selections. Ignore inaccessible changes and patch only the first
+		// changed row that is still addressable. The cached logical buffer is
+		// updated below, so ignored rows remain historical snapshots while new
+		// output naturally pushes them farther into scrollback.
+		if firstChanged >= 0 && firstChanged < r.logViewportTop {
+			firstChanged = -1
+			for idx := r.logViewportTop; idx < maxLines; idx++ {
+				oldLine := ""
+				if idx < len(r.logLines) {
+					oldLine = r.logLines[idx]
+				}
+				newLine := ""
+				if idx < len(lines) {
+					newLine = lines[idx]
+				}
+				if oldLine != newLine {
+					firstChanged = idx
+					break
+				}
+			}
+			// A newly appended blank row compares equal to the implicit empty
+			// row past the old slice, but it still has to advance the terminal.
+			if firstChanged == -1 && len(lines) > len(r.logLines) && len(r.logLines) >= r.logViewportTop {
+				firstChanged = len(r.logLines)
+			}
+		}
+
 		if firstChanged == -1 {
-			// No content changes; the final cursor positioning below may still
-			// move the hardware cursor if the editor cursor changed.
-		} else if firstChanged < r.logViewportTop {
-			// Changes above the visible viewport cannot be patched safely.
-			// Repaint without erasing scrollback: the terminal may have a
-			// native text selection anchored there while output streams.
-			writeFull(true, false)
+			// No addressable content changes; the final cursor positioning below
+			// may still move the hardware cursor if the editor cursor changed.
 		} else {
 			prevViewportTop := r.logViewportTop
 			viewportTop := prevViewportTop

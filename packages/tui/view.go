@@ -1323,13 +1323,11 @@ func toolBoxSide(th Theme, line string, width int) string {
 
 	cur := visibleWidth(line)
 	if cur > inner {
-		// Last-resort truncation. Strips ANSI styling at the cut
-		// point; rare path so the simpler implementation is fine.
-		line = stripANSI(line)
-		runes := []rune(line)
-		if len(runes) > inner {
-			line = string(runes[:inner])
-		}
+		// Last-resort truncation must retain syntax foreground escapes.
+		// Stripping ANSI here made long read results switch from their
+		// configured syntax color to the terminal's default foreground
+		// whenever the window became narrow enough to clip a line.
+		line = truncateToWidth(line, inner)
 		cur = visibleWidth(line)
 	}
 	pad := inner - cur

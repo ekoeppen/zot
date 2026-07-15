@@ -102,27 +102,51 @@ func TestDrawLogResizeForcesFullRedraw(t *testing.T) {
 	}
 }
 
-// TestDrawLogRecoveryPreservesScrollbackSelection covers long streaming
-// output whose changing first row has already scrolled above the viewport.
-// DrawLog must repaint in that case, but erasing terminal scrollback also
-// erases the text backing any native mouse selection the user is making.
-func TestDrawLogRecoveryPreservesScrollbackSelection(t *testing.T) {
+// TestDrawLogInaccessibleChangePreservesScrollbackSelection covers long
+// streaming output whose changing first row has already scrolled above the
+// viewport. That row is immutable terminal history: clearing or replaying it
+// either destroys a native mouse selection or duplicates stale tool frames.
+func TestDrawLogInaccessibleChangePreservesScrollbackSelection(t *testing.T) {
 	t.Setenv("TERM_PROGRAM", "")
 	var buf bytes.Buffer
 	r := NewRenderer(&buf)
 	r.Resize(80, 3)
-	r.DrawLog([]string{"partial", "line 2", "line 3", "line 4"}, []string{"input"}, 0, 0)
+	r.DrawLog([]string{"selected partial", "line 2", "line 3", "line 4"}, []string{"input"}, 0, 0)
 	buf.Reset()
 
-	// The changed row is above logViewportTop, forcing the recovery repaint
-	// used while a long streamed response continues to be reformatted.
-	r.DrawLog([]string{"partial response", "line 2", "line 3", "line 4"}, []string{"input"}, 0, 0)
+	// Only the historical row changed. DrawLog must leave the terminal alone
+	// instead of clearing and replaying the retained scrollback.
+	r.DrawLog([]string{"selected partial response", "line 2", "line 3", "line 4"}, []string{"input"}, 0, 0)
 	got := buf.String()
-	if !strings.Contains(got, SeqClearScreenNoHome) {
-		t.Fatalf("recovery path did not repaint the screen: %q", got)
+	if strings.Contains(got, SeqClearScreenNoHome) || strings.Contains(got, SeqClearScrollback) {
+		t.Fatalf("inaccessible change cleared selected scrollback: %q", got)
 	}
-	if strings.Contains(got, SeqClearScrollback) {
-		t.Fatalf("recovery repaint erased scrollback and native selection: %q", got)
+	if strings.Contains(got, "selected partial response") {
+		t.Fatalf("inaccessible row was replayed into retained scrollback: %q", got)
+	}
+}
+
+func TestDrawLogInaccessibleChangeStillAppendsNewOutput(t *testing.T) {
+	t.Setenv("TERM_PROGRAM", "")
+	var buf bytes.Buffer
+	r := NewRenderer(&buf)
+	r.Resize(80, 3)
+	r.DrawLog([]string{"selected partial", "line 2", "line 3", "line 4"}, []string{"input"}, 0, 0)
+	buf.Reset()
+
+	// A streaming reflow changes inaccessible history while a tool result is
+	// appended. Only the new suffix should be emitted, naturally scrolling the
+	// selected old text upward without replaying the complete frame.
+	r.DrawLog([]string{"selected partial response", "line 2", "line 3", "line 4", "tool output"}, []string{"input"}, 0, 0)
+	got := buf.String()
+	if strings.Contains(got, SeqClearScreenNoHome) || strings.Contains(got, SeqClearScrollback) {
+		t.Fatalf("append after inaccessible change cleared selected scrollback: %q", got)
+	}
+	if strings.Contains(got, "selected partial response") || strings.Contains(got, "line 2") {
+		t.Fatalf("append replayed historical rows: %q", got)
+	}
+	if !strings.Contains(got, "tool output") {
+		t.Fatalf("new tool output was not appended: %q", got)
 	}
 }
 
