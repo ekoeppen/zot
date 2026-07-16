@@ -329,6 +329,75 @@ func TestGeminiThinkingConfig(t *testing.T) {
 	}
 }
 
+func TestGeminiThoughtSignaturesStreamAndReplay(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: "+`{"candidates":[{"content":{"parts":[{"text":"think","thought":true}]}}]}`+"\n\n")
+		_, _ = io.WriteString(w, "data: "+`{"candidates":[{"content":{"parts":[{"text":"ing","thought":true,"thoughtSignature":"reasoning-sig"}]}}]}`+"\n\n")
+		_, _ = io.WriteString(w, "data: "+`{"candidates":[{"content":{"parts":[{"text":"ans"}]}}]}`+"\n\n")
+		_, _ = io.WriteString(w, "data: "+`{"candidates":[{"content":{"parts":[{"text":"wer","thoughtSignature":"text-sig"}]}}]}`+"\n\n")
+		_, _ = io.WriteString(w, "data: "+`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read","args":{"path":"a"}},"thoughtSignature":"tool-sig"}]},"finishReason":"STOP"}]}`+"\n\n")
+	}))
+	defer srv.Close()
+
+	client := NewGemini("k", srv.URL).(*geminiClient)
+	events, err := client.Stream(context.Background(), Request{Model: "gemini-3-flash"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var done EventDone
+	for event := range events {
+		if event, ok := event.(EventDone); ok {
+			done = event
+		}
+	}
+	if len(done.Message.Content) != 3 {
+		t.Fatalf("content = %#v", done.Message.Content)
+	}
+	reasoning, ok := done.Message.Content[0].(ReasoningBlock)
+	if !ok || reasoning.Summary != "thinking" || reasoning.Encrypted != "reasoning-sig" {
+		t.Fatalf("reasoning = %#v", done.Message.Content[0])
+	}
+	text, ok := done.Message.Content[1].(TextBlock)
+	if !ok || text.Text != "answer" || text.ThoughtSignature != "text-sig" {
+		t.Fatalf("text = %#v", done.Message.Content[1])
+	}
+	tool, ok := done.Message.Content[2].(ToolCallBlock)
+	if !ok || tool.ThoughtSignature != "tool-sig" {
+		t.Fatalf("tool = %#v", done.Message.Content[2])
+	}
+
+	wire, _, err := client.buildRequest(Request{
+		Model:    "gemini-3-flash",
+		Messages: []Message{done.Message},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := wire.Contents[0].Parts
+	if len(parts) != 3 || parts[0].ThoughtSignature != "reasoning-sig" ||
+		parts[1].ThoughtSignature != "text-sig" || parts[2].ThoughtSignature != "tool-sig" {
+		t.Fatalf("replayed parts = %#v", parts)
+	}
+}
+
+func TestGeminiAssistantImageReplaysThoughtSignature(t *testing.T) {
+	client := NewGemini("k", "https://example.invalid").(*geminiClient)
+	wire, _, err := client.buildRequest(Request{
+		Model: "gemini-3-flash",
+		Messages: []Message{{Role: RoleAssistant, Content: []Content{
+			ImageBlock{MimeType: "image/png", Data: []byte("png"), ThoughtSignature: "image-sig"},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := wire.Contents[0].Parts[0]
+	if part.InlineData == nil || part.ThoughtSignature != "image-sig" {
+		t.Fatalf("image part = %#v", part)
+	}
+}
+
 // TestDiscoverGoogle exercises the discovery helper against a fake
 // /v1beta/models endpoint, confirming pagination plus filtering of
 // non-chat ids (embedding, aqa).

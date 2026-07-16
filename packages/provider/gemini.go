@@ -80,8 +80,8 @@ type gemPart struct {
 	InlineData       *gemInlineData       `json:"inlineData,omitempty"`
 	FunctionCall     *gemFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *gemFunctionResponse `json:"functionResponse,omitempty"`
-	// Thought: true marks a thought-summary part. Outgoing parts
-	// from zot never set this; incoming chunks might.
+	// Thought marks a thought-summary part. ThoughtSignature is opaque
+	// provider state that must be replayed on the same part.
 	Thought          bool   `json:"thought,omitempty"`
 	ThoughtSignature string `json:"thoughtSignature,omitempty"`
 }
@@ -290,8 +290,6 @@ func convertGemAssistantParts(blocks []Content, functionsEnabled bool) []gemPart
 	for _, b := range blocks {
 		switch v := b.(type) {
 		case ReasoningBlock:
-			// Vertex AI requires thought parts with their signature to be
-			// replayed verbatim on follow-up turns.
 			if v.Encrypted != "" || v.Summary != "" {
 				parts = append(parts, gemPart{
 					Text:             v.Summary,
@@ -303,7 +301,15 @@ func convertGemAssistantParts(blocks []Content, functionsEnabled bool) []gemPart
 			if strings.TrimSpace(v.Text) == "" {
 				continue
 			}
-			parts = append(parts, gemPart{Text: v.Text})
+			parts = append(parts, gemPart{Text: v.Text, ThoughtSignature: v.ThoughtSignature})
+		case ImageBlock:
+			parts = append(parts, gemPart{
+				InlineData: &gemInlineData{
+					MimeType: v.MimeType,
+					Data:     base64.StdEncoding.EncodeToString(v.Data),
+				},
+				ThoughtSignature: v.ThoughtSignature,
+			})
 		case ToolCallBlock:
 			if !functionsEnabled {
 				continue
@@ -520,44 +526,54 @@ func (c *geminiClient) runStream(ctx context.Context, resp *http.Response, req R
 	// candidate carries a list of parts (text or functionCall),
 	// possibly accumulating across chunks.
 	type blockEntry struct {
-		kind               string // "text" | "image" | "tool_use" | "reasoning"
-		textBuf            strings.Builder
-		image              *ImageBlock
-		imagePath          string
-		toolID             string
-		toolName           string
-		toolArgs           strings.Builder
-		toolThoughtSig     string
-		reasoningSummary   string
-		reasoningSignature string
+		kind             string // "text" | "image" | "tool_use" | "reasoning"
+		textBuf          strings.Builder
+		thoughtSignature string
+		image            *ImageBlock
+		imagePath        string
+		toolID           string
+		toolName         string
+		toolArgs         strings.Builder
 	}
 	var (
-		blocks      []*blockEntry
-		currentText *blockEntry
-		usage       Usage
-		stop        StopReason = StopEnd
-		finalErr    error
-		toolCounter int
+		blocks           []*blockEntry
+		currentText      *blockEntry
+		currentReasoning *blockEntry
+		usage            Usage
+		stop             StopReason = StopEnd
+		finalErr         error
+		toolCounter      int
 	)
 
-	appendText := func(delta string) {
-		if currentText == nil {
-			currentText = &blockEntry{kind: "text"}
-			blocks = append(blocks, currentText)
+	appendPartText := func(kind, delta, signature string) {
+		current := &currentText
+		if kind == "reasoning" {
+			current = &currentReasoning
 		}
-		currentText.textBuf.WriteString(delta)
+		if *current == nil {
+			*current = &blockEntry{kind: kind}
+			blocks = append(blocks, *current)
+		}
+		(*current).textBuf.WriteString(delta)
+		if signature != "" {
+			(*current).thoughtSignature = signature
+			// A signature terminates this wire part. A later delta of the
+			// same kind belongs to a new part and must not be merged into it.
+			*current = nil
+		}
 	}
 
-	appendImage := func(mimeType, dataB64 string) {
+	appendImage := func(mimeType, dataB64, signature string) {
 		data, err := base64.StdEncoding.DecodeString(dataB64)
 		if err != nil || len(data) == 0 {
 			return
 		}
-		img := ImageBlock{MimeType: mimeType, Data: data}
+		img := ImageBlock{MimeType: mimeType, Data: data, ThoughtSignature: signature}
 		path, _ := saveGeminiImageToWorkingDir(mimeType, data)
 		blocks = append(blocks, &blockEntry{kind: "image", image: &img, imagePath: path})
-		// Image blocks break the current text run.
+		// Non-text parts break both streamed text runs.
 		currentText = nil
+		currentReasoning = nil
 	}
 
 	startTool := func(name string, providedID string, args json.RawMessage) *blockEntry {
@@ -575,8 +591,9 @@ func (c *geminiClient) runStream(ctx context.Context, resp *http.Response, req R
 			t.toolArgs.Write(args)
 		}
 		blocks = append(blocks, t)
-		// New tool block breaks the current text run.
+		// New tool blocks break both streamed text runs.
 		currentText = nil
+		currentReasoning = nil
 		return t
 	}
 
@@ -586,7 +603,17 @@ func (c *geminiClient) runStream(ctx context.Context, resp *http.Response, req R
 			switch b.kind {
 			case "text":
 				if b.textBuf.Len() > 0 {
-					content = append(content, TextBlock{Text: b.textBuf.String()})
+					content = append(content, TextBlock{
+						Text:             b.textBuf.String(),
+						ThoughtSignature: b.thoughtSignature,
+					})
+				}
+			case "reasoning":
+				if b.textBuf.Len() > 0 || b.thoughtSignature != "" {
+					content = append(content, ReasoningBlock{
+						Summary:   b.textBuf.String(),
+						Encrypted: b.thoughtSignature,
+					})
 				}
 			case "image":
 				if b.image != nil && len(b.image.Data) > 0 {
@@ -595,19 +622,16 @@ func (c *geminiClient) runStream(ctx context.Context, resp *http.Response, req R
 						content = append(content, TextBlock{Text: fmt.Sprintf("Saved image: `%s`", b.imagePath)})
 					}
 				}
-			case "reasoning":
-				content = append(content, ReasoningBlock{
-					Summary:   b.reasoningSummary,
-					Encrypted: b.reasoningSignature,
-				})
 			case "tool_use":
 				args := b.toolArgs.String()
 				if args == "" || !json.Valid([]byte(args)) {
 					args = "{}"
 				}
 				content = append(content, ToolCallBlock{
-					ID: b.toolID, Name: b.toolName, Arguments: json.RawMessage(args),
-					ThoughtSignature: b.toolThoughtSig,
+					ID:               b.toolID,
+					Name:             b.toolName,
+					Arguments:        json.RawMessage(args),
+					ThoughtSignature: b.thoughtSignature,
 				})
 			}
 		}
@@ -676,7 +700,7 @@ func (c *geminiClient) runStream(ctx context.Context, resp *http.Response, req R
 			for _, cand := range chunk.Candidates {
 				for _, part := range cand.Content.Parts {
 					if part.InlineData != nil {
-						appendImage(part.InlineData.MimeType, part.InlineData.Data)
+						appendImage(part.InlineData.MimeType, part.InlineData.Data, part.ThoughtSignature)
 						continue
 					}
 					if part.FunctionCall != nil {
@@ -687,28 +711,22 @@ func (c *geminiClient) runStream(ctx context.Context, resp *http.Response, req R
 							args = json.RawMessage("{}")
 						}
 						t := startTool(part.FunctionCall.Name, part.FunctionCallID, args)
-						t.toolThoughtSig = part.ThoughtSignature
+						t.thoughtSignature = part.ThoughtSignature
 						out <- EventToolStart{ID: t.toolID, Name: t.toolName}
 						out <- EventToolArgs{ID: t.toolID, Delta: t.toolArgs.String()}
 						out <- EventToolEnd{ID: t.toolID}
 						continue
 					}
-					if part.Text == "" {
-						continue
-					}
 					if part.Thought {
-						// Store thought parts as ReasoningBlocks so
-						// Vertex AI can replay the thought_signature
-						// on follow-up turns (required by the API).
-						blocks = append(blocks, &blockEntry{
-							kind:               "reasoning",
-							reasoningSummary:   part.Text,
-							reasoningSignature: part.ThoughtSignature,
-						})
+						appendPartText("reasoning", part.Text, part.ThoughtSignature)
 						currentText = nil
 						continue
 					}
-					appendText(part.Text)
+					if part.Text == "" {
+						continue
+					}
+					appendPartText("text", part.Text, part.ThoughtSignature)
+					currentReasoning = nil
 					out <- EventTextDelta{Delta: part.Text}
 				}
 				switch cand.FinishReason {

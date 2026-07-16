@@ -820,15 +820,16 @@ func hydrateMessageObject(rawMessage []byte) (provider.Message, error) {
 	msg := provider.Message{Role: row.Role, Time: row.Time, Meta: row.Meta}
 	for _, raw := range row.Content {
 		var head struct {
-			Text        string `json:"text"`
-			MimeType    string `json:"mime_type"`
-			Data        []byte `json:"data"`
-			ID          string `json:"id"`
-			Name        string `json:"name"`
-			CallID      string `json:"call_id"`
-			ReasoningID string `json:"reasoning_id"`
-			Summary     string `json:"summary"`
-			Encrypted   string `json:"encrypted_content"`
+			Text             string `json:"text"`
+			MimeType         string `json:"mime_type"`
+			Data             []byte `json:"data"`
+			ID               string `json:"id"`
+			Name             string `json:"name"`
+			CallID           string `json:"call_id"`
+			ReasoningID      string `json:"reasoning_id"`
+			Summary          string `json:"summary"`
+			Encrypted        string `json:"encrypted_content"`
+			ThoughtSignature string `json:"thought_signature"`
 			// ToolCallBlock also has Arguments, ToolResultBlock has Content + IsError
 		}
 		if err := json.Unmarshal(raw, &head); err != nil {
@@ -836,7 +837,7 @@ func hydrateMessageObject(rawMessage []byte) (provider.Message, error) {
 		}
 		// Discriminate by presence of fields.
 		switch {
-		case head.ReasoningID != "" || head.Encrypted != "":
+		case head.ReasoningID != "" || head.Summary != "" || head.Encrypted != "":
 			msg.Content = append(msg.Content, provider.ReasoningBlock{
 				ID:        head.ReasoningID,
 				Summary:   head.Summary,
@@ -844,12 +845,18 @@ func hydrateMessageObject(rawMessage []byte) (provider.Message, error) {
 			})
 		case head.Name != "" && head.ID != "":
 			var tc struct {
-				ID        string          `json:"id"`
-				Name      string          `json:"name"`
-				Arguments json.RawMessage `json:"arguments"`
+				ID               string          `json:"id"`
+				Name             string          `json:"name"`
+				Arguments        json.RawMessage `json:"arguments"`
+				ThoughtSignature string          `json:"thought_signature"`
 			}
 			_ = json.Unmarshal(raw, &tc)
-			msg.Content = append(msg.Content, provider.ToolCallBlock{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments})
+			msg.Content = append(msg.Content, provider.ToolCallBlock{
+				ID:               tc.ID,
+				Name:             tc.Name,
+				Arguments:        tc.Arguments,
+				ThoughtSignature: tc.ThoughtSignature,
+			})
 		case head.CallID != "":
 			var tr struct {
 				CallID  string            `json:"call_id"`
@@ -873,9 +880,16 @@ func hydrateMessageObject(rawMessage []byte) (provider.Message, error) {
 			}
 			msg.Content = append(msg.Content, block)
 		case head.MimeType != "":
-			msg.Content = append(msg.Content, provider.ImageBlock{MimeType: head.MimeType, Data: head.Data})
+			msg.Content = append(msg.Content, provider.ImageBlock{
+				MimeType:         head.MimeType,
+				Data:             head.Data,
+				ThoughtSignature: head.ThoughtSignature,
+			})
 		default:
-			msg.Content = append(msg.Content, provider.TextBlock{Text: head.Text})
+			msg.Content = append(msg.Content, provider.TextBlock{
+				Text:             head.Text,
+				ThoughtSignature: head.ThoughtSignature,
+			})
 		}
 	}
 	return msg, nil
