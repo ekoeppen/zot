@@ -28,24 +28,27 @@ type Content interface {
 
 // TextBlock is plain text content.
 type TextBlock struct {
-	Text string `json:"text"`
+	Text             string `json:"text"`
+	ThoughtSignature string `json:"thought_signature,omitempty"`
 }
 
 func (TextBlock) isContent() {}
 
 // ImageBlock is an inline image (PNG/JPEG/GIF/WebP).
 type ImageBlock struct {
-	MimeType string `json:"mime_type"`
-	Data     []byte `json:"data"` // raw bytes; encoded to base64 on the wire
+	MimeType         string `json:"mime_type"`
+	Data             []byte `json:"data"` // raw bytes; encoded to base64 on the wire
+	ThoughtSignature string `json:"thought_signature,omitempty"`
 }
 
 func (ImageBlock) isContent() {}
 
 // ToolCallBlock is an assistant-issued call to a tool.
 type ToolCallBlock struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	Arguments        json.RawMessage `json:"arguments"`
+	ThoughtSignature string          `json:"thought_signature,omitempty"`
 }
 
 func (ToolCallBlock) isContent() {}

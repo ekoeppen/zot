@@ -46,6 +46,64 @@ func TestSessionRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSessionRoundTripPreservesThoughtSignatures(t *testing.T) {
+	dir := t.TempDir()
+	sess, err := NewSession(dir, "/tmp/project", "google", "gemini-3-flash", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := provider.Message{
+		Role: provider.RoleAssistant,
+		Content: []provider.Content{
+			provider.ReasoningBlock{Summary: "thinking"},
+			provider.TextBlock{Text: "answer", ThoughtSignature: "text-sig"},
+			provider.ImageBlock{MimeType: "image/png", Data: []byte("png"), ThoughtSignature: "image-sig"},
+			provider.ToolCallBlock{
+				ID:               "call-1",
+				Name:             "read",
+				Arguments:        []byte(`{"path":"a"}`),
+				ThoughtSignature: "tool-sig",
+			},
+		},
+	}
+	if err := sess.AppendMessage(msg); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.AppendMessage(provider.Message{
+		Role: provider.RoleTool,
+		Content: []provider.Content{provider.ToolResultBlock{
+			CallID:  "call-1",
+			Content: []provider.Content{provider.TextBlock{Text: "result"}},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, msgs, err := OpenSession(sess.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	if len(msgs) != 2 || len(msgs[0].Content) != 4 {
+		t.Fatalf("round trip content = %+v", msgs)
+	}
+	if rb, ok := msgs[0].Content[0].(provider.ReasoningBlock); !ok || rb.Summary != "thinking" {
+		t.Fatalf("reasoning block = %#v", msgs[0].Content[0])
+	}
+	if tb, ok := msgs[0].Content[1].(provider.TextBlock); !ok || tb.ThoughtSignature != "text-sig" {
+		t.Fatalf("text block = %#v", msgs[0].Content[1])
+	}
+	if ib, ok := msgs[0].Content[2].(provider.ImageBlock); !ok || ib.ThoughtSignature != "image-sig" {
+		t.Fatalf("image block = %#v", msgs[0].Content[2])
+	}
+	if tc, ok := msgs[0].Content[3].(provider.ToolCallBlock); !ok || tc.ThoughtSignature != "tool-sig" {
+		t.Fatalf("tool call block = %#v", msgs[0].Content[3])
+	}
+}
+
 // TestNewSessionAtPathCreatesAtExplicitPath proves the swarm child's
 // session-persistence fallback works: NewSessionAtPath creates the
 // file (and parent dirs) at the exact path the caller chose,
