@@ -18,6 +18,34 @@ var supplementCatalog = []Model{
 	{Provider: "kimi", ID: "kimi-k2-thinking", DisplayName: "Kimi K2 Thinking",
 		ContextWindow: 262144, MaxOutput: 32000, Reasoning: true,
 		BaseURL: "https://api.kimi.com/coding"},
+	{Provider: "kimi", ID: "k3", DisplayName: "Kimi K3",
+		ContextWindow: 262144, MaxOutput: 131072, Reasoning: true,
+		PriceInput: 3, PriceOutput: 15, PriceCacheRead: 0.3,
+		BaseURL: "https://api.kimi.com/coding"},
+
+	// ----- Kimi K3 on OpenAI-compatible providers -----
+	{Provider: "moonshotai", ID: "kimi-k3", DisplayName: "Kimi K3",
+		ContextWindow: 262144, MaxOutput: 131072, Reasoning: true,
+		PriceInput: 3, PriceOutput: 15, PriceCacheRead: 0.3,
+		BaseURL: "https://api.moonshot.ai/v1"},
+	{Provider: "moonshotai-cn", ID: "kimi-k3", DisplayName: "Kimi K3",
+		ContextWindow: 262144, MaxOutput: 131072, Reasoning: true,
+		PriceInput: 3, PriceOutput: 15, PriceCacheRead: 0.3,
+		BaseURL: "https://api.moonshot.cn/v1"},
+	{Provider: "openrouter", ID: "moonshotai/kimi-k3", DisplayName: "Kimi K3",
+		ContextWindow: 262144, MaxOutput: 131072, Reasoning: true,
+		PriceInput: 3, PriceOutput: 15, PriceCacheRead: 0.3,
+		BaseURL: "https://openrouter.ai/api/v1"},
+	{Provider: "vercel-ai-gateway", ID: "moonshotai/kimi-k3", DisplayName: "Kimi K3",
+		ContextWindow: 262144, MaxOutput: 131072, Reasoning: true,
+		PriceInput: 3, PriceOutput: 15, PriceCacheRead: 0.3,
+		BaseURL: "https://ai-gateway.vercel.sh"},
+
+	// ----- xAI Responses API -----
+	{Provider: "xai", ID: "grok-4.5", DisplayName: "Grok 4.5",
+		ContextWindow: 2000000, MaxOutput: 30000, Reasoning: true,
+		PriceInput: 1.25, PriceOutput: 2.5, PriceCacheRead: 0.2,
+		BaseURL: "https://api.x.ai/v1"},
 
 	// ----- openai-responses (public OpenAI Responses API) -----
 	{Provider: "openai-responses", ID: "gpt-5", DisplayName: "GPT-5 (Responses)",

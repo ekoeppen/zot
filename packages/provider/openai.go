@@ -144,6 +144,7 @@ type oaiMessage struct {
 	Name       string        `json:"name,omitempty"`
 	ToolCalls  []oaiToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string        `json:"tool_call_id,omitempty"`
+	Tools      []oaiTool     `json:"tools,omitempty"`
 	// ReasoningContent carries the model's chain-of-thought summary
 	// alongside an assistant tool-call message. Required by Kimi's
 	// chat completions endpoint when thinking is enabled and the
@@ -267,6 +268,18 @@ func (c *openaiClient) buildRequest(req Request) (*oaiRequest, error) {
 		out.Messages = append(out.Messages, oaiMessage{Role: "system", Content: req.System})
 	}
 
+	deferredMode := isKimiDeferredModel(req.Model)
+	toolByName := make(map[string]Tool, len(req.Tools))
+	activatedTools := make(map[string]bool)
+	for _, t := range req.Tools {
+		toolByName[t.Name] = t
+	}
+	for _, msg := range req.Messages {
+		for _, name := range msg.AddedToolNames {
+			activatedTools[name] = true
+		}
+	}
+
 	// DeepSeek's chat-completions API rejects the multimodal content
 	// schema (parts arrays containing image_url). Force every user/tool
 	// message to a plain string and silently drop image blocks for
@@ -345,21 +358,44 @@ func (c *openaiClient) buildRequest(req Request) (*oaiRequest, error) {
 				}
 			}
 		}
+		if deferredMode {
+			var loaded []oaiTool
+			for _, name := range msg.AddedToolNames {
+				if t, ok := toolByName[name]; ok && t.Deferred {
+					loaded = append(loaded, makeOAITool(t))
+				}
+			}
+			if len(loaded) > 0 {
+				out.Messages = append(out.Messages, oaiMessage{Role: "system", Tools: loaded})
+			}
+		}
 	}
 
 	for _, t := range req.Tools {
-		var tool oaiTool
-		tool.Type = "function"
-		tool.Function.Name = t.Name
-		tool.Function.Description = t.Description
-		tool.Function.Parameters = t.Schema
-		out.Tools = append(out.Tools, tool)
+		if t.Deferred && (deferredMode || !activatedTools[t.Name]) {
+			continue
+		}
+		out.Tools = append(out.Tools, makeOAITool(t))
 	}
 	if len(out.Tools) > 0 {
 		out.ToolChoice = "auto"
 	}
 
 	return out, nil
+}
+
+func isKimiDeferredModel(model string) bool {
+	model = strings.ToLower(model)
+	return model == "kimi-k3" || strings.HasSuffix(model, "/kimi-k3")
+}
+
+func makeOAITool(t Tool) oaiTool {
+	var tool oaiTool
+	tool.Type = "function"
+	tool.Function.Name = t.Name
+	tool.Function.Description = t.Description
+	tool.Function.Parameters = t.Schema
+	return tool
 }
 
 func buildOAIUserContent(blocks []Content, textOnly bool) interface{} {

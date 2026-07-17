@@ -114,10 +114,11 @@ func RepairOrphanedToolResults(msgs []Message) []Message {
 
 // Message is a single turn in the conversation.
 type Message struct {
-	Role    Role              `json:"role"`
-	Content []Content         `json:"content"`
-	Time    time.Time         `json:"time"`
-	Meta    map[string]string `json:"meta,omitempty"`
+	Role           Role              `json:"role"`
+	Content        []Content         `json:"content"`
+	Time           time.Time         `json:"time"`
+	Meta           map[string]string `json:"meta,omitempty"`
+	AddedToolNames []string          `json:"added_tool_names,omitempty"`
 }
 
 // Tool is a tool definition advertised to the LLM.
@@ -125,6 +126,8 @@ type Tool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Schema      json.RawMessage `json:"schema"` // JSON Schema for arguments
+	// Deferred hides the definition until a tool result activates it.
+	Deferred bool `json:"deferred,omitempty"`
 }
 
 // Usage aggregates token counts and cost for a turn.

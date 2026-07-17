@@ -151,8 +151,9 @@ type AssistantMessageHandler func(text string) AssistantMessageDecision
 // one with TextResult, ImageResult, or directly when you need to
 // combine multiple blocks.
 type ToolResult struct {
-	Content []ToolContent
-	IsError bool
+	Content       []ToolContent
+	IsError       bool
+	ActivateTools []string
 }
 
 // ToolContent is one block of tool output. Either Text is set, or
@@ -279,6 +280,7 @@ type toolDef struct {
 	name        string
 	description string
 	schema      json.RawMessage
+	deferred    bool
 }
 
 // HostInfo is what the host (zot) tells us in HelloAck. Useful for
@@ -388,9 +390,19 @@ func (e *Extension) Command(name, description string, fn CommandHandler) {
 // Naming conflicts with built-in tools (read, write, edit, bash,
 // skill) are silently shadowed by the built-in.
 func (e *Extension) Tool(name, description string, schema json.RawMessage, fn ToolHandler) {
+	e.registerTool(name, description, schema, false, fn)
+}
+
+// DeferredTool registers a tool whose definition stays hidden until another
+// tool result names it in ActivateTools.
+func (e *Extension) DeferredTool(name, description string, schema json.RawMessage, fn ToolHandler) {
+	e.registerTool(name, description, schema, true, fn)
+}
+
+func (e *Extension) registerTool(name, description string, schema json.RawMessage, deferred bool, fn ToolHandler) {
 	e.mu.Lock()
 	e.tools[name] = fn
-	e.toolDefs = append(e.toolDefs, toolDef{name: name, description: description, schema: schema})
+	e.toolDefs = append(e.toolDefs, toolDef{name: name, description: description, schema: schema, deferred: deferred})
 	e.mu.Unlock()
 }
 
@@ -532,6 +544,7 @@ func (e *Extension) Run() error {
 			Name:        td.name,
 			Description: td.description,
 			Schema:      td.schema,
+			Deferred:    td.deferred,
 		})
 	}
 	var intercepts []string
@@ -704,10 +717,11 @@ func (e *Extension) respondTool(id string, r ToolResult) {
 		})
 	}
 	_ = e.send(extproto.ToolResultFromExt{
-		Type:    "tool_result",
-		ID:      id,
-		Content: blocks,
-		IsError: r.IsError,
+		Type:          "tool_result",
+		ID:            id,
+		Content:       blocks,
+		IsError:       r.IsError,
+		ActivateTools: r.ActivateTools,
 	})
 }
 

@@ -35,6 +35,7 @@ These providers support subscription login:
 | Anthropic | Claude Pro/Max OAuth credentials. |
 | OpenAI Codex | ChatGPT Plus/Pro Codex subscription route. Separate from the OpenAI API-key provider. |
 | Kimi | Kimi subscription login. |
+| xAI | SuperGrok or X Premium device-code login. The browser URL is prefilled with the device code. |
 | GitHub Copilot | GitHub Copilot token flow. |
 
 OAuth tokens are stored in `$ZOT_HOME/auth.json` and refreshed when refresh is

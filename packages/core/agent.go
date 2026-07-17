@@ -629,6 +629,7 @@ func (a *Agent) oneTurn(ctx context.Context, sink func(AgentEvent)) (provider.St
 // a single tool-role message carrying all results.
 func (a *Agent) executeTools(ctx context.Context, msg provider.Message, sink func(AgentEvent)) (provider.Message, bool) {
 	var results []provider.Content
+	var addedTools []string
 	hadError := false
 
 	for _, c := range msg.Content {
@@ -645,13 +646,19 @@ func (a *Agent) executeTools(ctx context.Context, msg provider.Message, sink fun
 			Content: res.Content,
 			IsError: res.IsError,
 		})
+		for _, name := range res.ActivateTools {
+			if _, err := a.Tools.Get(name); err == nil && !containsString(addedTools, name) {
+				addedTools = append(addedTools, name)
+			}
+		}
 		sink(EvToolResult{ID: tc.ID, Result: res})
 	}
 
 	return provider.Message{
-		Role:    provider.RoleTool,
-		Content: results,
-		Time:    time.Now(),
+		Role:           provider.RoleTool,
+		Content:        results,
+		Time:           time.Now(),
+		AddedToolNames: addedTools,
 	}, hadError
 }
 
@@ -755,6 +762,15 @@ func mirrorToolImagesAsUser(msg provider.Message) provider.Message {
 	prefix := provider.TextBlock{Text: "Tool output included the following image content:"}
 	content = append([]provider.Content{prefix}, content...)
 	return provider.Message{Role: provider.RoleUser, Content: content, Time: time.Now()}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func extractText(msg provider.Message) string {

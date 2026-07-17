@@ -90,18 +90,19 @@ The easiest way is to just run `zot` and type `/login`. The TUI opens even witho
 Run `zot` and type `/login`. Pick one of two methods:
 
 - **API key**: a small local web server starts on `127.0.0.1:<free-port>`, your browser opens a form, you pick a provider from the full API-key provider list, paste the key, and zot saves it to `auth.json` if accepted. Providers with a lightweight model-list endpoint are probed before saving; provider backends that need extra project/account env vars are saved directly.
-- **Subscription**: use your Claude Pro/Max, ChatGPT Plus/Pro, Kimi Code, or GitHub Copilot subscription. DeepSeek and Google Gemini do **not** have a subscription login path. For those, use the API-key flow.
+- **Subscription**: use your Claude Pro/Max, ChatGPT Plus/Pro, Kimi Code, SuperGrok/X Premium, or GitHub Copilot subscription. DeepSeek and Google Gemini do **not** have a subscription login path. For those, use the API-key flow.
   - Anthropic and OpenAI pin the browser callback to fixed provider-specific ports (`localhost:53692` for Anthropic, `localhost:1455` for OpenAI) because those are the only ports their auth servers will redirect to.
   - Anthropic uses the Claude Code OAuth flow. Messages go to `api.anthropic.com` with a bearer token and the Claude Code identity headers.
   - OpenAI uses the Codex CLI OAuth flow. Messages go to `chatgpt.com/backend-api/codex/responses` with the `chatgpt-account-id` extracted from the returned id_token.
   - Kimi uses the Kimi Code device-code OAuth flow. zot opens the verification URL, polls until you approve it in the browser, then sends messages to `api.kimi.com/coding/v1` with the Kimi Code identity headers.
+  - xAI uses a device-code OAuth flow. zot opens a prefilled authorization URL, polls for approval, and uses the resulting token with the xAI API.
   - GitHub Copilot uses GitHub's device-code login flow. zot stores the GitHub access token and exchanges it for short-lived Copilot inference tokens on demand.
 
-> **Note on subscription login.** The OAuth client IDs used are the ones published in Anthropic's Claude Code CLI, OpenAI's Codex CLI, Kimi Code CLI, and GitHub Copilot's device-code flow. Reusing them from a third-party tool may be against their terms of service and may be revoked at any time. Use it at your own risk; the API-key flow is the safe default.
+> **Note on subscription login.** The OAuth client IDs used are the ones published in Anthropic's Claude Code CLI, OpenAI's Codex CLI, Kimi Code CLI, xAI's device flow, and GitHub Copilot's device-code flow. Reusing them from a third-party tool may be against their terms of service and may be revoked at any time. Use it at your own risk; the API-key flow is the safe default.
 
 ### Token refresh
 
-OAuth access tokens are short-lived (Anthropic ~8h, OpenAI ~30d; Kimi and GitHub Copilot also use refresh/exchange flows). zot refreshes or exchanges them automatically:
+OAuth access tokens are short-lived (Anthropic ~8h, OpenAI ~30d; Kimi, xAI, and GitHub Copilot also use refresh/exchange flows). zot refreshes or exchanges them automatically:
 
 - At every credential lookup, zot checks the stored `expiry` and, if past it (with a 60s safety margin), hits the provider's `oauth/token` endpoint with the stored `refresh_token`, persists the new `access_token`, `refresh_token`, and `expiry` back to `auth.json`, and hands the fresh token to the client.
 - The telegram bridge additionally refreshes once per turn so a bot that runs for days keeps working without manual intervention.
@@ -382,7 +383,7 @@ Every interactive or print/json run (unless `--no-session`) writes a JSONL trans
 
 zot's built-in provider catalog includes:
 
-- **Subscription-capable**: Anthropic Claude Pro/Max (`anthropic`), OpenAI Codex / ChatGPT Plus/Pro (`openai-codex`), Kimi Code (`kimi`), GitHub Copilot (`github-copilot`).
+- **Subscription-capable**: Anthropic Claude Pro/Max (`anthropic`), OpenAI Codex / ChatGPT Plus/Pro (`openai-codex`), Kimi Code (`kimi`), SuperGrok/X Premium (`xai`), GitHub Copilot (`github-copilot`).
 - **Direct API providers**: Anthropic, OpenAI Chat Completions, OpenAI Responses, DeepSeek, Google Gemini, Kimi/Moonshot, Moonshot CN, Groq, Cerebras, xAI, Together AI, Hugging Face Router, OpenRouter, Mistral, Z.AI, Xiaomi/MiMo token-plan regions, MiniMax global/CN, Fireworks, Vercel AI Gateway, OpenCode/OpenCode Go.
 - **Cloud/platform providers**: Amazon Bedrock, Google Vertex AI, Azure OpenAI, Cloudflare Workers AI, Cloudflare AI Gateway.
 - **Local/compatible**: Ollama and OpenAI-compatible local endpoints via `--base-url`.
@@ -461,7 +462,7 @@ Custom providers are first-class: they appear in `--list-models`, `/model`, and 
 
 ### Kimi Code
 
-zot has built-in Kimi support through Kimi's OpenAI-compatible chat API.
+zot has built-in Kimi support through the Kimi Coding endpoint and Moonshot's OpenAI-compatible chat API.
 
 ```bash
 zot --provider kimi
@@ -488,7 +489,13 @@ For direct Moonshot API keys or a custom compatible endpoint:
 zot --provider kimi --model kimi-k2-0905-preview --base-url https://api.moonshot.ai/v1 --api-key "$KIMI_API_KEY"
 ```
 
+Kimi K3 is built in as `kimi/k3`, `moonshotai/kimi-k3`, `moonshotai-cn/kimi-k3`, `openrouter/moonshotai/kimi-k3`, and `vercel-ai-gateway/moonshotai/kimi-k3`. Its output limit is 131,072 tokens on every built-in route.
+
 You can add additional Kimi/Moonshot model IDs to `models.json` under the `kimi` provider.
+
+### xAI
+
+xAI supports either `XAI_API_KEY` or `/login` subscription authentication. The subscription option is labeled `Sign in with SuperGrok or X Premium`, opens a prefilled device-authorization URL, and refreshes the stored token automatically. The default xAI model is `grok-4.5`, sent through the Responses API.
 
 ### DeepSeek
 

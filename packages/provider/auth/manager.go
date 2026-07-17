@@ -136,6 +136,9 @@ func (m *Manager) StartOAuth(provider string) (string, error) {
 	if provider == "kimi" {
 		return m.StartKimiDeviceOAuth()
 	}
+	if provider == "xai" {
+		return m.StartXAIDeviceOAuth()
+	}
 	if provider == "github-copilot" {
 		return m.StartGitHubCopilotDeviceOAuth()
 	}
@@ -152,7 +155,7 @@ func (m *Manager) StartOAuth(provider string) (string, error) {
 	case "deepseek":
 		return "", fmt.Errorf("deepseek login is api-key only; use api key login")
 	default:
-		return "", fmt.Errorf("provider must be anthropic, openai, openai-codex, kimi, github-copilot, deepseek, or google")
+		return "", fmt.Errorf("provider must be anthropic, openai, openai-codex, kimi, xai, github-copilot, deepseek, or google")
 	}
 
 	m.mu.Lock()
@@ -258,6 +261,41 @@ func (m *Manager) StartKimiDeviceOAuth() (string, error) {
 	return url, nil
 }
 
+// StartXAIDeviceOAuth starts xAI's device-code subscription login.
+func (m *Manager) StartXAIDeviceOAuth() (string, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.mu.Lock()
+	if m.oauthCancel != nil {
+		m.oauthCancel()
+	}
+	m.oauthCtx = ctx
+	m.oauthCancel = cancel
+	m.mu.Unlock()
+
+	dev, err := RequestXAIDeviceAuthorization(ctx)
+	if err != nil {
+		return "", err
+	}
+	loginURL := dev.VerificationURIComplete
+	go m.maybeOpen(loginURL)
+	m.emit(Event{Kind: "started", Provider: "xai", Method: "oauth", URL: loginURL})
+	go func() {
+		tok, err := PollXAIDeviceToken(ctx, dev)
+		if err != nil {
+			if ctx.Err() == nil {
+				m.emit(Event{Kind: "error", Provider: "xai", Method: "oauth", Message: err.Error()})
+			}
+			return
+		}
+		if err := m.store.SetOAuth("xai", *tok); err != nil {
+			m.emit(Event{Kind: "error", Provider: "xai", Method: "oauth", Message: err.Error()})
+			return
+		}
+		m.emit(Event{Kind: "success", Provider: "xai", Method: "oauth"})
+	}()
+	return loginURL, nil
+}
+
 // StartGitHubCopilotDeviceOAuth starts GitHub Copilot's device-code subscription login.
 func (m *Manager) StartGitHubCopilotDeviceOAuth() (string, error) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -304,6 +342,9 @@ func (m *Manager) StartManualOAuth(provider string) (string, error) {
 	if provider == "kimi" {
 		return m.StartKimiDeviceOAuth()
 	}
+	if provider == "xai" {
+		return m.StartXAIDeviceOAuth()
+	}
 	if provider == "github-copilot" {
 		return m.StartGitHubCopilotDeviceOAuth()
 	}
@@ -320,7 +361,7 @@ func (m *Manager) StartManualOAuth(provider string) (string, error) {
 	case "deepseek":
 		return "", fmt.Errorf("deepseek login is api-key only; use api key login")
 	default:
-		return "", fmt.Errorf("provider must be anthropic, openai, openai-codex, kimi, github-copilot, deepseek, or google")
+		return "", fmt.Errorf("provider must be anthropic, openai, openai-codex, kimi, xai, github-copilot, deepseek, or google")
 	}
 
 	pkce, err := NewPKCE()

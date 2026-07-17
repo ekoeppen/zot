@@ -31,6 +31,9 @@ type ToolResult struct {
 	Content []provider.Content
 	// IsError marks this result as an error to the LLM.
 	IsError bool
+	// ActivateTools names previously deferred tools that become available
+	// after this result. Unknown names are ignored by the agent.
+	ActivateTools []string
 	// Details is arbitrary data for UIs and logs; not sent to the LLM.
 	Details any
 }
@@ -62,10 +65,15 @@ func (r Registry) Specs() []provider.Tool {
 	out := make([]provider.Tool, 0, len(r))
 	for _, name := range names {
 		t := r[name]
+		deferred := false
+		if d, ok := t.(interface{ Deferred() bool }); ok {
+			deferred = d.Deferred()
+		}
 		out = append(out, provider.Tool{
 			Name:        t.Name(),
 			Description: t.Description(),
 			Schema:      t.Schema(),
+			Deferred:    deferred,
 		})
 	}
 	return out

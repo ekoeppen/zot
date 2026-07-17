@@ -4275,6 +4275,17 @@ func (i *Interactive) startOAuthFlow(provider string) {
 	if provider == "kimi" && i.cfg.SetKimiCLIFallbackDisabled != nil {
 		_ = i.cfg.SetKimiCLIFallbackDisabled(false)
 	}
+	// Device-code providers already support headless login and must only
+	// start one polling flow.
+	if provider == "kimi" || provider == "xai" || provider == "github-copilot" {
+		loginURL, err := i.cfg.AuthManager.StartOAuth(provider)
+		if err != nil {
+			i.dialog.ShowResult(false, err.Error())
+			return
+		}
+		i.dialog.ShowWaiting(loginURL)
+		return
+	}
 	// Always run the manual/copy-code flow in parallel with the local
 	// callback server so headless environments (docker, SSH) can paste
 	// the authorization code directly without first pressing 'p'.

@@ -966,6 +966,7 @@ type ToolInfo struct {
 	Name        string
 	Description string
 	Schema      json.RawMessage
+	Deferred    bool
 }
 
 // Tools returns a snapshot of every (extension, tool) pair currently
@@ -982,6 +983,7 @@ func (m *Manager) Tools() []ToolInfo {
 				Name:        t.Name,
 				Description: t.Description,
 				Schema:      t.Schema,
+				Deferred:    t.Deferred,
 			})
 		}
 	}

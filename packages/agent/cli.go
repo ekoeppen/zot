@@ -106,6 +106,7 @@ func (a *extToolAdapter) Tools() []ExtensionToolInfo {
 			Name:        t.Name,
 			Description: t.Description,
 			Schema:      t.Schema,
+			Deferred:    t.Deferred,
 		}
 	}
 	return out
@@ -117,6 +118,7 @@ func (a *extToolAdapter) NewExtensionTool(info ExtensionToolInfo) core.Tool {
 		Name:        info.Name,
 		Description: info.Description,
 		Schema:      info.Schema,
+		Deferred:    info.Deferred,
 	})
 }
 

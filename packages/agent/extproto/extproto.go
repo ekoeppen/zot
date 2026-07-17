@@ -44,6 +44,7 @@ type RegisterToolFromExt struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Schema      json.RawMessage `json:"schema"`
+	Deferred    bool            `json:"deferred,omitempty"`
 }
 
 type ReadyFromExt struct {
@@ -66,10 +67,11 @@ type EventInterceptResponseFromExt struct {
 }
 
 type ToolResultFromExt struct {
-	Type    string         `json:"type"`
-	ID      string         `json:"id"`
-	Content []ContentBlock `json:"content"`
-	IsError bool           `json:"is_error,omitempty"`
+	Type          string         `json:"type"`
+	ID            string         `json:"id"`
+	Content       []ContentBlock `json:"content"`
+	IsError       bool           `json:"is_error,omitempty"`
+	ActivateTools []string       `json:"activate_tools,omitempty"`
 }
 
 type ContentBlock struct {

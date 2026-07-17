@@ -220,6 +220,55 @@ func TestOpenPanelEmitsCorrectFrame(t *testing.T) {
 	h.hostW.Close()
 }
 
+func TestDeferredToolRegistrationAndActivation(t *testing.T) {
+	h := newHarness("deferred-ext")
+	h.ext.DeferredTool("weather", "weather lookup", json.RawMessage(`{"type":"object"}`), func(json.RawMessage) ToolResult {
+		return TextResult("sunny")
+	})
+	h.ext.Tool("search_tools", "find tools", json.RawMessage(`{"type":"object"}`), func(json.RawMessage) ToolResult {
+		result := TextResult("enabled")
+		result.ActivateTools = []string{"weather"}
+		return result
+	})
+
+	go h.ext.Run()
+	if frame := h.next(t); frame.hdr.Type != "hello" {
+		t.Fatalf("expected hello, got %q", frame.hdr.Type)
+	}
+	h.sendToExt(t, extproto.HelloAckFromHost{Type: "hello_ack", ProtocolVersion: extproto.ProtocolVersion})
+
+	deferred := false
+	for {
+		frame := h.next(t)
+		if frame.hdr.Type == "ready" {
+			break
+		}
+		if frame.hdr.Type == "register_tool" {
+			var registration extproto.RegisterToolFromExt
+			if err := json.Unmarshal(frame.raw, &registration); err != nil {
+				t.Fatal(err)
+			}
+			if registration.Name == "weather" {
+				deferred = registration.Deferred
+			}
+		}
+	}
+	if !deferred {
+		t.Fatal("weather registration was not deferred")
+	}
+
+	h.sendToExt(t, extproto.ToolCallFromHost{Type: "tool_call", ID: "call-1", Name: "search_tools", Args: json.RawMessage(`{}`)})
+	frame := h.drainUntil(t, "tool_result")
+	var result extproto.ToolResultFromExt
+	if err := json.Unmarshal(frame.raw, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.ActivateTools) != 1 || result.ActivateTools[0] != "weather" {
+		t.Fatalf("activate_tools = %v", result.ActivateTools)
+	}
+	h.hostW.Close()
+}
+
 // TestBlockingToolWaitsForPanelKey is the core integration test for
 // the human-in-the-loop pattern: the tool handler opens a panel,
 // blocks on a channel, and only returns a tool_result after a key

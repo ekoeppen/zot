@@ -407,8 +407,14 @@ func ResolveCredentialFull(provider, explicit string) (cred, method, accountID s
 	if err != nil {
 		return "", "", "", err
 	}
-	if pc, ok := c.AdditionalAPIKeyCreds[provider]; ok && pc.APIKey != "" {
-		return pc.APIKey, "apikey", "", nil
+	if pc, ok := c.AdditionalAPIKeyCreds[provider]; ok {
+		if pc.APIKey != "" {
+			return pc.APIKey, "apikey", "", nil
+		}
+		if provider == "xai" && pc.OAuth != nil && pc.OAuth.AccessToken != "" {
+			tok, _ := refreshIfExpired(provider, pc.OAuth)
+			return tok.AccessToken, "oauth", "", nil
+		}
 	}
 	switch provider {
 	case "anthropic":
@@ -554,6 +560,9 @@ func loadOAuthToken(providerName string) *auth.OAuthToken {
 			return c.GithubCopilot.OAuth
 		}
 	}
+	if pc, ok := c.AdditionalAPIKeyCreds[providerName]; ok {
+		return pc.OAuth
+	}
 	return nil
 }
 
@@ -573,6 +582,22 @@ func refreshIfExpired(providerName string, tok *auth.OAuthToken) (*auth.OAuthTok
 	}
 	if tok.RefreshToken == "" {
 		return tok, fmt.Errorf("%s oauth token expired and no refresh_token available — run /login again", providerName)
+	}
+
+	if providerName == "xai" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		next, err := auth.RefreshXAIToken(ctx, tok.RefreshToken)
+		if err != nil {
+			return tok, fmt.Errorf("refresh %s: %w", providerName, err)
+		}
+		if next.RefreshToken == "" {
+			next.RefreshToken = tok.RefreshToken
+		}
+		if err := AuthStoreFor().SetOAuth(providerName, *next); err != nil {
+			return next, fmt.Errorf("persist refreshed token: %w", err)
+		}
+		return next, nil
 	}
 
 	var op auth.OAuthProvider

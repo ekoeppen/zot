@@ -809,15 +809,16 @@ func hydrateMessage(lineBytes []byte) (provider.Message, error) {
 
 func hydrateMessageObject(rawMessage []byte) (provider.Message, error) {
 	var row struct {
-		Role    provider.Role     `json:"role"`
-		Content []json.RawMessage `json:"content"`
-		Time    time.Time         `json:"time"`
-		Meta    map[string]string `json:"meta,omitempty"`
+		Role           provider.Role     `json:"role"`
+		Content        []json.RawMessage `json:"content"`
+		Time           time.Time         `json:"time"`
+		Meta           map[string]string `json:"meta,omitempty"`
+		AddedToolNames []string          `json:"added_tool_names,omitempty"`
 	}
 	if err := json.Unmarshal(rawMessage, &row); err != nil {
 		return provider.Message{}, err
 	}
-	msg := provider.Message{Role: row.Role, Time: row.Time, Meta: row.Meta}
+	msg := provider.Message{Role: row.Role, Time: row.Time, Meta: row.Meta, AddedToolNames: row.AddedToolNames}
 	for _, raw := range row.Content {
 		var head struct {
 			Text             string `json:"text"`

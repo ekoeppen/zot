@@ -406,6 +406,12 @@ func TestResolveInsecureFromConfigRequiresExplicitBaseURL(t *testing.T) {
 	assertDefaultTransportStillSecure(t)
 }
 
+func TestDefaultXAIModelIsGrok45(t *testing.T) {
+	if got := defaultModelForProvider("xai"); got != "grok-4.5" {
+		t.Fatalf("default xAI model = %q, want grok-4.5", got)
+	}
+}
+
 func assertDefaultTransportStillSecure(t *testing.T) {
 	t.Helper()
 	tr, ok := http.DefaultTransport.(*http.Transport)

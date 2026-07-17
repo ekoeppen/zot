@@ -89,8 +89,17 @@ func (a *Agent) Compact(ctx context.Context, keepTail int, sink func(delta strin
 
 	// Replace transcript: one synthetic user message with the summary,
 	// followed by the preserved tail (if any).
+	var activatedTools []string
+	for _, message := range msgs {
+		for _, name := range message.AddedToolNames {
+			if !containsString(activatedTools, name) {
+				activatedTools = append(activatedTools, name)
+			}
+		}
+	}
 	synthetic := provider.Message{
-		Role: provider.RoleUser,
+		Role:           provider.RoleUser,
+		AddedToolNames: activatedTools,
 		Content: []provider.Content{
 			provider.TextBlock{Text: "## Context Summary (compacted)\n\n" + summary},
 		},

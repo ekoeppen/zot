@@ -25,6 +25,7 @@ type extensionTool struct {
 	extension   string
 	manager     *Manager
 	timeout     time.Duration
+	deferred    bool
 }
 
 // NewTool returns a core.Tool that round-trips invocations through
@@ -38,6 +39,7 @@ func NewTool(mgr *Manager, info ToolInfo) core.Tool {
 		extension:   info.Extension,
 		manager:     mgr,
 		timeout:     60 * time.Second,
+		deferred:    info.Deferred,
 	}
 }
 
@@ -45,6 +47,7 @@ func (t *extensionTool) Name() string            { return t.name }
 func (t *extensionTool) Description() string     { return t.description }
 func (t *extensionTool) Schema() json.RawMessage { return t.schema }
 func (t *extensionTool) Extension() string       { return t.extension }
+func (t *extensionTool) Deferred() bool          { return t.deferred }
 
 // Execute is what the agent calls when the LLM invokes the tool. It
 // hands args to the owning extension, waits up to t.timeout for the
@@ -60,7 +63,7 @@ func (t *extensionTool) Execute(ctx context.Context, args json.RawMessage, _ fun
 			Content: []provider.Content{provider.TextBlock{Text: fmt.Sprintf("extension %s/%s failed: %v", t.extension, t.name, err)}},
 		}, nil
 	}
-	out := core.ToolResult{IsError: resp.IsError}
+	out := core.ToolResult{IsError: resp.IsError, ActivateTools: resp.ActivateTools}
 	for _, b := range resp.Content {
 		switch b.Type {
 		case "text":

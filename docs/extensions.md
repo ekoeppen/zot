@@ -204,6 +204,16 @@ Tool names live in the same namespace as built-in tools (`read`,
 `write`, `edit`, `bash`, `skill`). Conflicts are silently shadowed by
 the built-in.
 
+Set `"deferred": true` to register a tool without advertising its definition initially. A loader tool can activate registered deferred tools by returning their names in `activate_tools`:
+
+```json
+{"type":"tool_result","id":"...",
+ "content":[{"type":"text","text":"Enabled weather lookup"}],
+ "activate_tools":["weather"]}
+```
+
+On Kimi K3's OpenAI-compatible routes, zot places newly activated schemas at the tool-result position using Kimi's native deferred-tool format. Other models receive the complete active tool list on the next request. Unknown names are ignored. The Go extension SDK exposes `DeferredTool` and `ToolResult.ActivateTools` for the same protocol.
+
 #### `ready`
 
 Sentinel telling zot "all initial registrations are flushed". Send it
@@ -219,7 +229,8 @@ agent's tool registry without racing the registration window.
 Reply to a `tool_call` from the host. `content[]` is a list of
 message blocks; each block is `{"type":"text","text":"..."}` or
 `{"type":"image","mime_type":"image/png","data":"<base64>"}`. Set
-`is_error: true` to mark the call as failed.
+`is_error: true` to mark the call as failed. `activate_tools` can name
+registered deferred tools that become available after this result.
 
 ```json
 {"type":"tool_result","id":"...",

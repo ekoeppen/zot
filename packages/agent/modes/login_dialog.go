@@ -149,7 +149,11 @@ func (d *loginDialog) Render(th tui.Theme, width int) []string {
 		for i := start; i < end; i++ {
 			o := opts[i]
 			tag := providerPickerTag(d.method, d.status[o])
-			label := "  " + providerLabel(o)
+			providerName := providerLabel(o)
+			if d.method == "oauth" && o == "xai" {
+				providerName = "Sign in with SuperGrok or X Premium"
+			}
+			label := "  " + providerName
 			plain := label + tag
 			if i == d.cursor {
 				lines = append(lines, th.PadHighlight(plain, width))
@@ -172,6 +176,11 @@ func (d *loginDialog) Render(th tui.Theme, width int) []string {
 			lines = append(lines, th.FG256(th.Accent, seg))
 		}
 		lines = append(lines, "")
+		if d.provider == "kimi" || d.provider == "xai" || d.provider == "github-copilot" {
+			lines = append(lines, th.FG256(th.Muted, "complete sign-in in the browser - esc cancels"))
+			lines = append(lines, frameRule(th, width))
+			break
+		}
 		lines = append(lines, th.FG256(th.Muted, "paste the authorization code (or full redirect URL / code#state):"))
 		if d.codeEd == nil {
 			d.codeEd = tui.NewEditor(th.AccentBar(th.Accent))
@@ -241,7 +250,7 @@ func (d *loginDialog) Render(th tui.Theme, width int) []string {
 func providersForMethod(method string) []string {
 	var providers []string
 	if method == "oauth" {
-		providers = []string{"anthropic", "openai-codex", "kimi", "github-copilot"}
+		providers = []string{"anthropic", "openai-codex", "kimi", "xai", "github-copilot"}
 	} else {
 		providers = auth.APIKeyProviders()
 		// Append custom providers from models.json so they appear

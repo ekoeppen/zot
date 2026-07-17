@@ -112,6 +112,7 @@ type ExtensionToolInfo struct {
 	Name        string
 	Description string
 	Schema      []byte
+	Deferred    bool
 }
 
 // toolSummariesFromRegistry rebuilds the system-prompt tool list
@@ -120,6 +121,9 @@ type ExtensionToolInfo struct {
 func toolSummariesFromRegistry(reg core.Registry, cached map[string]string) []ToolSummary {
 	out := make([]ToolSummary, 0, len(reg))
 	for name, t := range reg {
+		if d, ok := t.(interface{ Deferred() bool }); ok && d.Deferred() {
+			continue
+		}
 		desc := t.Description()
 		if d, ok := cached[name]; ok && d != "" {
 			desc = d
@@ -160,7 +164,7 @@ func defaultModelForProvider(prov string) string {
 	case "groq":
 		return "llama-3.3-70b-versatile"
 	case "xai":
-		return "grok-code-fast-1"
+		return "grok-4.5"
 	case "together":
 		return "Qwen/Qwen3-Coder-480B-A35B-Instruct"
 	case "huggingface":
@@ -773,7 +777,16 @@ func (r Resolved) NewClient() provider.Client {
 	case "groq":
 		return wrap(provider.NewGroq(r.Credential, r.BaseURL))
 	case "xai":
-		return wrap(provider.NewXAI(r.Credential, r.BaseURL))
+		var inner provider.Client
+		if r.Model == "grok-4.5" {
+			inner = wrap(provider.NewOpenAIResponsesNamed(r.Credential, r.BaseURL, "xai"))
+		} else {
+			inner = wrap(provider.NewXAI(r.Credential, r.BaseURL))
+		}
+		if r.AuthMethod == "oauth" {
+			return r.wrapWithRefresh(inner)
+		}
+		return inner
 	case "together":
 		return wrap(provider.NewTogether(r.Credential, r.BaseURL))
 	case "huggingface":
@@ -868,6 +881,11 @@ func (r Resolved) wrapWithRefresh(inner provider.Client) provider.Client {
 		case "kimi":
 			// anthropic-messages on api.kimi.com/coding.
 			return r.withHTTPClient(provider.NewKimiCodingWithHeaders(token, baseURL, kimiCodeHeaders()))
+		case "xai":
+			if r.Model == "grok-4.5" {
+				return r.withHTTPClient(provider.NewOpenAIResponsesNamed(token, baseURL, "xai"))
+			}
+			return r.withHTTPClient(provider.NewXAI(token, baseURL))
 		default:
 			return r.withHTTPClient(provider.NewAnthropicOAuth(token, baseURL))
 		}
