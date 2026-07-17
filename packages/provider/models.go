@@ -10,6 +10,7 @@ type Model struct {
 	Provider      string // "anthropic" | "openai"
 	ID            string // API id
 	DisplayName   string
+	API           string // wire API override for providers that support multiple protocols
 	ContextWindow int
 	MaxOutput     int
 	Reasoning     bool // supports reasoning/thinking
@@ -317,19 +318,19 @@ var Catalog = []Model{
 		Speculative: true,
 	},
 	{
-		Provider: "openai", ID: "gpt-5.6-luna", DisplayName: "GPT-5.6 Luna",
+		Provider: "openai", ID: "gpt-5.6-luna", DisplayName: "GPT-5.6 Luna", API: APIResponses,
 		ContextWindow: 272000, MaxOutput: 128000, Reasoning: true,
 		PriceInput: 1, PriceOutput: 6, PriceCacheRead: 0.1, PriceCacheWrite: 1.25,
 		Speculative: true,
 	},
 	{
-		Provider: "openai", ID: "gpt-5.6-sol", DisplayName: "GPT-5.6 Sol",
+		Provider: "openai", ID: "gpt-5.6-sol", DisplayName: "GPT-5.6 Sol", API: APIResponses,
 		ContextWindow: 272000, MaxOutput: 128000, Reasoning: true,
 		PriceInput: 5, PriceOutput: 30, PriceCacheRead: 0.5, PriceCacheWrite: 6.25,
 		Speculative: true,
 	},
 	{
-		Provider: "openai", ID: "gpt-5.6-terra", DisplayName: "GPT-5.6 Terra",
+		Provider: "openai", ID: "gpt-5.6-terra", DisplayName: "GPT-5.6 Terra", API: APIResponses,
 		ContextWindow: 272000, MaxOutput: 128000, Reasoning: true,
 		PriceInput: 2.5, PriceOutput: 15, PriceCacheRead: 0.25, PriceCacheWrite: 3.125,
 		Speculative: true,

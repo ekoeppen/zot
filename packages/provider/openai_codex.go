@@ -159,11 +159,20 @@ type codexRequest struct {
 
 // ---- Request building ----
 
-func (c *codexClient) buildRequest(req Request) (*codexRequest, error) {
-	m, err := FindModel("openai-codex", req.Model)
-	if err != nil {
-		m, err = FindModel("openai", req.Model)
+func (c *codexClient) findModel(id string) (Model, error) {
+	if c.providerName != "" && c.providerName != "openai-codex" {
+		if m, err := FindModel(c.providerName, id); err == nil {
+			return m, nil
+		}
 	}
+	if m, err := FindModel("openai-codex", id); err == nil {
+		return m, nil
+	}
+	return FindModel("openai", id)
+}
+
+func (c *codexClient) buildRequest(req Request) (*codexRequest, error) {
+	m, err := c.findModel(req.Model)
 	if err != nil {
 		return nil, err
 	}
@@ -405,10 +414,7 @@ func (c *codexClient) runStream(ctx context.Context, resp *http.Response, req Re
 	defer close(out)
 	defer resp.Body.Close()
 
-	model, _ := FindModel("openai-codex", req.Model)
-	if model.ID == "" {
-		model, _ = FindModel("openai", req.Model)
-	}
+	model, _ := c.findModel(req.Model)
 	providerName := c.providerName
 	if providerName == "" {
 		providerName = "openai-codex"

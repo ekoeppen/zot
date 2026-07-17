@@ -758,10 +758,11 @@ func (r Resolved) NewClient() provider.Client {
 	case "deepseek":
 		return wrap(provider.NewDeepSeek(r.Credential, r.BaseURL))
 	case "openai":
-		if strings.HasPrefix(r.Model, "gpt-5.6-") {
-			return wrap(provider.NewOpenAIResponsesNamed(r.Credential, r.BaseURL, "openai"))
-		}
-		return wrap(provider.NewOpenAI(r.Credential, r.BaseURL))
+		return provider.NewModelRouter("openai",
+			wrap(provider.NewOpenAI(r.Credential, r.BaseURL)),
+			map[string]provider.Client{
+				provider.APIResponses: wrap(provider.NewOpenAIResponsesNamed(r.Credential, r.BaseURL, "openai")),
+			})
 	case "openai-codex":
 		inner := wrap(provider.NewOpenAICodex(r.Credential, r.AccountID, r.BaseURL))
 		return r.wrapWithRefresh(inner)
@@ -777,12 +778,7 @@ func (r Resolved) NewClient() provider.Client {
 	case "groq":
 		return wrap(provider.NewGroq(r.Credential, r.BaseURL))
 	case "xai":
-		var inner provider.Client
-		if r.Model == "grok-4.5" {
-			inner = wrap(provider.NewOpenAIResponsesNamed(r.Credential, r.BaseURL, "xai"))
-		} else {
-			inner = wrap(provider.NewXAI(r.Credential, r.BaseURL))
-		}
+		inner := r.newXAIClient(r.Credential)
 		if r.AuthMethod == "oauth" {
 			return r.wrapWithRefresh(inner)
 		}
@@ -854,6 +850,14 @@ func (r Resolved) withHTTPClient(c provider.Client) provider.Client {
 	return provider.WithHTTPClient(c, provider.NewHTTPClient(true))
 }
 
+func (r Resolved) newXAIClient(token string) provider.Client {
+	return provider.NewModelRouter("xai",
+		r.withHTTPClient(provider.NewXAI(token, r.BaseURL)),
+		map[string]provider.Client{
+			provider.APIResponses: r.withHTTPClient(provider.NewOpenAIResponsesNamed(token, r.BaseURL, "xai")),
+		})
+}
+
 // wrapWithRefresh wraps an OAuth client so the access token is
 // refreshed automatically before each API call. Without this, long
 // sessions (hours) silently fail when the 1-hour token expires.
@@ -882,10 +886,7 @@ func (r Resolved) wrapWithRefresh(inner provider.Client) provider.Client {
 			// anthropic-messages on api.kimi.com/coding.
 			return r.withHTTPClient(provider.NewKimiCodingWithHeaders(token, baseURL, kimiCodeHeaders()))
 		case "xai":
-			if r.Model == "grok-4.5" {
-				return r.withHTTPClient(provider.NewOpenAIResponsesNamed(token, baseURL, "xai"))
-			}
-			return r.withHTTPClient(provider.NewXAI(token, baseURL))
+			return r.newXAIClient(token)
 		default:
 			return r.withHTTPClient(provider.NewAnthropicOAuth(token, baseURL))
 		}

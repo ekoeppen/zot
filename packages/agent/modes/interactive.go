@@ -4654,8 +4654,8 @@ func (i *Interactive) swapModel(prov, model string, builder func(string, string)
 		return
 	}
 	// Same provider AND not a rescue retry: just swap the model on
-	// the existing agent — no rebuild needed because the underlying
-	// client is reusable. Rescue retries always rebuild so a stale
+	// the existing agent. Mixed-API providers dispatch from model metadata,
+	// so the client remains reusable. Rescue retries always rebuild so a stale
 	// auth header / base URL can't carry over.
 	if !rescue && i.agent != nil && m.Provider == i.cfg.Provider {
 		i.mu.Lock()

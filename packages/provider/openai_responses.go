@@ -55,9 +55,7 @@ func NewOpenAIResponses(apiKey, baseURL string) Client {
 // reporting the supplied provider name. This lets the `openai` provider
 // route Responses-only preview models without changing the visible provider.
 func NewOpenAIResponsesNamed(apiKey, baseURL, name string) Client {
-	if baseURL == "" {
-		baseURL = openaiResponsesDefaultBaseURL
-	}
+	baseURL = responsesURL(baseURL)
 	httpClient := &http.Client{
 		Transport: &openaiResponsesTransport{inner: http.DefaultTransport},
 		Timeout:   0,
@@ -71,4 +69,21 @@ func NewOpenAIResponsesNamed(apiKey, baseURL, name string) Client {
 		http:         httpClient,
 	}
 	return &renamedClient{inner: inner, name: name}
+}
+
+// responsesURL accepts either an API root or a complete Responses endpoint.
+// Catalog model entries generally carry API roots, while explicit overrides
+// may already include /responses.
+func responsesURL(baseURL string) string {
+	baseURL = strings.TrimRight(baseURL, "/")
+	if baseURL == "" {
+		return openaiResponsesDefaultBaseURL
+	}
+	if strings.HasSuffix(baseURL, "/responses") {
+		return baseURL
+	}
+	if versionSegmentSuffix.MatchString(baseURL) {
+		return baseURL + "/responses"
+	}
+	return baseURL + "/v1/responses"
 }

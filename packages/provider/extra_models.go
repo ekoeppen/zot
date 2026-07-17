@@ -42,7 +42,7 @@ var supplementCatalog = []Model{
 		BaseURL: "https://ai-gateway.vercel.sh"},
 
 	// ----- xAI Responses API -----
-	{Provider: "xai", ID: "grok-4.5", DisplayName: "Grok 4.5",
+	{Provider: "xai", ID: "grok-4.5", DisplayName: "Grok 4.5", API: APIResponses,
 		ContextWindow: 2000000, MaxOutput: 30000, Reasoning: true,
 		PriceInput: 1.25, PriceOutput: 2.5, PriceCacheRead: 0.2,
 		BaseURL: "https://api.x.ai/v1"},

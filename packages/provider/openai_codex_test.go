@@ -125,6 +125,20 @@ func TestGPT56UsesNativeMaxReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestXAIResponsesUsesNamedProviderCatalogAndEndpoint(t *testing.T) {
+	named := NewOpenAIResponsesNamed("token", "https://api.x.ai/v1", "xai").(*renamedClient)
+	c := named.inner.(*codexClient)
+
+	if c.baseURL != "https://api.x.ai/v1/responses" {
+		t.Fatalf("base URL = %q", c.baseURL)
+	}
+	for _, model := range []string{"grok-4.5", "grok-build-0.1"} {
+		if _, err := c.buildRequest(Request{Model: model}); err != nil {
+			t.Errorf("build request for %s: %v", model, err)
+		}
+	}
+}
+
 func TestOpenAIGPT56DoesNotUseCodexCLIRouting(t *testing.T) {
 	named := NewOpenAIResponsesNamed("token", "https://example.test/v1/responses", "openai").(*renamedClient)
 	c := named.inner.(*codexClient)

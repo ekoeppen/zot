@@ -45,6 +45,11 @@ func WithHTTPClient(c Client, httpClient *http.Client) Client {
 		v.http = httpClient
 	case *renamedClient:
 		v.inner = WithHTTPClient(v.inner, httpClient)
+	case *modelRouter:
+		v.fallback = WithHTTPClient(v.fallback, httpClient)
+		for api, inner := range v.byAPI {
+			v.byAPI[api] = WithHTTPClient(inner, httpClient)
+		}
 	}
 	return c
 }

@@ -87,7 +87,7 @@ func TestKimiK3AndGrok45CatalogMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !m.Reasoning || m.MaxOutput != 30000 {
+	if !m.Reasoning || m.MaxOutput != 30000 || m.API != APIResponses {
 		t.Fatalf("xai/grok-4.5 metadata = %+v", m)
 	}
 }
