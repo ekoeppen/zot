@@ -633,25 +633,49 @@ func (r *Renderer) DrawLog(chat, bottom []string, cursorBottomRow, cursorCol int
 		// updated below, so ignored rows remain historical snapshots while new
 		// output naturally pushes them farther into scrollback.
 		if firstChanged >= 0 && firstChanged < r.logViewportTop {
-			firstChanged = -1
-			for idx := r.logViewportTop; idx < maxLines; idx++ {
-				oldLine := ""
-				if idx < len(r.logLines) {
-					oldLine = r.logLines[idx]
+			// A height change above the viewport shifts the logical row numbers
+			// of everything below it. If any already-emitted visible row also
+			// changed, an index-based patch would target the wrong physical row
+			// and splice the next tool frame into the previous one's border.
+			// Recover with a clean repaint. Pure suffix appends remain safe and
+			// keep terminal selections intact.
+			structuralReflow := len(chatFrame) < len(r.logChat)
+			if len(chatFrame) != len(r.logChat) {
+				overlapEnd := len(chatFrame)
+				if len(r.logChat) < overlapEnd {
+					overlapEnd = len(r.logChat)
 				}
-				newLine := ""
-				if idx < len(lines) {
-					newLine = lines[idx]
-				}
-				if oldLine != newLine {
-					firstChanged = idx
-					break
+				for idx := r.logViewportTop; idx < overlapEnd; idx++ {
+					if r.logChat[idx] != chatFrame[idx] {
+						structuralReflow = true
+						break
+					}
 				}
 			}
-			// A newly appended blank row compares equal to the implicit empty
-			// row past the old slice, but it still has to advance the terminal.
-			if firstChanged == -1 && len(lines) > len(r.logLines) && len(r.logLines) >= r.logViewportTop {
-				firstChanged = len(r.logLines)
+			if structuralReflow {
+				writeFull(true, false)
+				firstChanged = -1
+			} else {
+				firstChanged = -1
+				for idx := r.logViewportTop; idx < maxLines; idx++ {
+					oldLine := ""
+					if idx < len(r.logLines) {
+						oldLine = r.logLines[idx]
+					}
+					newLine := ""
+					if idx < len(lines) {
+						newLine = lines[idx]
+					}
+					if oldLine != newLine {
+						firstChanged = idx
+						break
+					}
+				}
+				// A newly appended blank row compares equal to the implicit empty
+				// row past the old slice, but it still has to advance the terminal.
+				if firstChanged == -1 && len(lines) > len(r.logLines) && len(r.logLines) >= r.logViewportTop {
+					firstChanged = len(r.logLines)
+				}
 			}
 		}
 

@@ -126,6 +126,40 @@ func TestDrawLogInaccessibleChangePreservesScrollbackSelection(t *testing.T) {
 	}
 }
 
+func TestDrawLogStructuralReflowAboveViewportRepaintsToolFrames(t *testing.T) {
+	t.Setenv("TERM_PROGRAM", "")
+	var buf bytes.Buffer
+	r := NewRenderer(&buf)
+	r.Resize(80, 4)
+	oldChat := []string{
+		"┌ bash first ─────", "│", "│ old output", "└──────────────────",
+		"┌ bash second ────", "│ second output", "└──────────────────",
+	}
+	r.DrawLog(oldChat, []string{"input"}, 0, 0)
+	buf.Reset()
+
+	// The first tool gains wrapped rows after its top has scrolled away.
+	// Every following logical row shifts, so patching by the old indexes
+	// would draw the second header inside the first tool's border.
+	newChat := []string{
+		"┌ bash first ─────", "│", "│ old output", "│ wrapped line 1", "│ wrapped line 2", "└──────────────────",
+		"┌ bash second ────", "│ second output", "└──────────────────",
+	}
+	r.DrawLog(newChat, []string{"input"}, 0, 0)
+	got := buf.String()
+	if !strings.Contains(got, SeqClearScreenNoHome) {
+		t.Fatalf("structural reflow was patched in place instead of repainted: %q", got)
+	}
+	for _, want := range []string{"│ wrapped line 2", "┌ bash second", "└──────────────────"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("repaint missing %q: %q", want, got)
+		}
+	}
+	if strings.Contains(got, SeqClearScrollback) {
+		t.Fatalf("automatic recovery erased terminal scrollback: %q", got)
+	}
+}
+
 func TestDrawLogInaccessibleChangeStillAppendsNewOutput(t *testing.T) {
 	t.Setenv("TERM_PROGRAM", "")
 	var buf bytes.Buffer
