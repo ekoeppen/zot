@@ -41,6 +41,18 @@ func TestModelCatalog(t *testing.T) {
 	}
 }
 
+func TestVertexGeminiFlashCatalogLimits(t *testing.T) {
+	for _, id := range []string{"gemini-3.1-flash-lite", "gemini-3.5-flash"} {
+		m, err := FindModel("google-vertex", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.ContextWindow != 1048576 || m.MaxOutput != 65535 || !m.Reasoning {
+			t.Errorf("%s metadata = %+v", id, m)
+		}
+	}
+}
+
 func TestComputeCost(t *testing.T) {
 	m, _ := FindModel("anthropic", "claude-sonnet-4-5")
 	cost := ComputeCost(m, Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000})
