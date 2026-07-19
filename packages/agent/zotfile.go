@@ -77,12 +77,12 @@ func runZotfileCommand(rawArgs []string, version string) (bool, error) {
 		return true, zotPack(dir, out)
 	case "inspect":
 		if len(rawArgs) < 2 {
-			return true, fmt.Errorf("zot inspect requires a .zot file, directory, or GitHub URL")
+			return true, fmt.Errorf("zot inspect requires a name, .zot file, directory, or GitHub URL")
 		}
 		return true, zotInspect(rawArgs[1])
 	case "verify":
 		if len(rawArgs) < 2 {
-			return true, fmt.Errorf("zot verify requires a .zot file, directory, or GitHub URL")
+			return true, fmt.Errorf("zot verify requires a name, .zot file, directory, or GitHub URL")
 		}
 		zf, cleanup, err := loadZotfile(rawArgs[1])
 		if cleanup != nil {
@@ -95,7 +95,7 @@ func runZotfileCommand(rawArgs []string, version string) (bool, error) {
 		return true, nil
 	case "run":
 		if len(rawArgs) < 2 {
-			return true, fmt.Errorf("zot run requires a .zot file, directory, or GitHub URL")
+			return true, fmt.Errorf("zot run requires a name, .zot file, directory, or GitHub URL")
 		}
 		ref := rawArgs[1]
 		rest := rawArgs[2:]
@@ -318,6 +318,11 @@ func zotPack(dir, out string) error {
 }
 
 func loadZotfile(ref string) (zotfileLoaded, func(), error) {
+	resolved, err := resolveZotfileRef(ref)
+	if err != nil {
+		return zotfileLoaded{}, nil, err
+	}
+	ref = resolved
 	if u, err := url.Parse(ref); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
 		return loadRemoteZotfile(u)
 	}
@@ -356,6 +361,43 @@ func loadZotfile(ref string) (zotfileLoaded, func(), error) {
 		return zotfileLoaded{}, nil, err
 	}
 	return zotfileLoaded{Dir: tmp, Temp: true, Digest: digest, Manifest: m}, cleanup, nil
+}
+
+const officialZotfileCollection = "https://github.com/patriceckhart/agents"
+
+func resolveZotfileRef(ref string) (string, error) {
+	if u, err := url.Parse(ref); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
+		return ref, nil
+	}
+	if _, err := os.Stat(ref); err == nil {
+		return ref, nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	if filepath.Ext(ref) == "" {
+		archive := ref + ".zot"
+		if _, err := os.Stat(archive); err == nil {
+			return archive, nil
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+	}
+	if strings.HasSuffix(strings.ToLower(ref), ".zot") {
+		return ref, nil
+	}
+	collectionRef := strings.ReplaceAll(ref, "\\", "/")
+	parts := strings.Split(collectionRef, "/")
+	if len(parts) == 1 && validZotfileCollectionSegment(parts[0]) {
+		return officialZotfileCollection + "/" + parts[0], nil
+	}
+	if len(parts) == 2 && validZotfileCollectionSegment(parts[0]) && validZotfileCollectionSegment(parts[1]) {
+		return "https://github.com/patriceckhart/" + parts[0] + "/" + parts[1], nil
+	}
+	return ref, nil
+}
+
+func validZotfileCollectionSegment(s string) bool {
+	return s != "" && s == strings.ToLower(s) && safeAgentName(s) == s
 }
 
 var zotfileHTTPClient = &http.Client{Timeout: 60 * time.Second}

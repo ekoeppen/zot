@@ -103,7 +103,7 @@ type Args struct {
 	SwarmAgent string
 
 	// AgentName/AgentDataDir/PermissionSet are populated by `zot run`
-	// for local Zotfile agents. They scope sessions and enforce the
+	// for local zotfile agents. They scope sessions and enforce the
 	// manifest's declared file/bash permissions.
 	AgentName     string
 	AgentDataDir  string

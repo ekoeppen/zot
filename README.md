@@ -215,15 +215,16 @@ When the sandbox is on (see `/jail`), all four tools refuse paths outside the se
 
 ## zotfile agents
 
-A zotfile packages an agent's instructions, skills, requirements, and enforced tool permissions as a shareable agent. Run one from a local directory, a packed `.zot` artifact, or directly from a public GitHub repository:
+A zotfile packages an agent's instructions, skills, requirements, and enforced tool permissions as a shareable agent. Run one from a local directory, a packed `.zot` artifact, a short name, or directly from a public GitHub repository:
 
 ```bash
 zot run ./my-agent
 zot run ./my-agent.zot
+zot run zot-maintenance --cwd /path/to/zot
 zot run https://github.com/patriceckhart/agents/zot-maintenance --cwd /path/to/zot
 ```
 
-For a GitHub URL, zot downloads the repository archive into a temporary directory, validates and runs the selected agent, then removes the downloaded source when the command exits. Agent data, consent receipts, and sessions still persist under `$ZOT_HOME`. See [docs/zotfiles.md](docs/zotfiles.md) for authoring, permissions, packaging, and current limitations.
+Short names resolve local-first: zot checks the matching directory and `.zot` archive before falling back to the official GitHub agent collection. For GitHub sources, zot downloads the repository archive into a temporary directory, validates and runs the selected agent, then removes the downloaded source when the command exits. Agent data, consent receipts, and sessions still persist under `$ZOT_HOME`. See [docs/zotfiles.md](docs/zotfiles.md) for authoring, permissions, packaging, and current limitations.
 
 ## Embedding
 

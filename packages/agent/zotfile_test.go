@@ -48,6 +48,41 @@ func TestLoadZotfileRejectsUnsafeOrCollidingNames(t *testing.T) {
 	}
 }
 
+func TestResolveZotfileRefUsesLocalFirstThenOfficialCollection(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.Mkdir("local-agent", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("packed-agent.zot", []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		ref  string
+		want string
+	}{
+		{"local-agent", "local-agent"},
+		{"packed-agent", "packed-agent.zot"},
+		{"remote-agent", officialZotfileCollection + "/remote-agent"},
+		{"missing.zot", "missing.zot"},
+		{"agents/remote-agent", "https://github.com/patriceckhart/agents/remote-agent"},
+		{`agents\remote-agent`, "https://github.com/patriceckhart/agents/remote-agent"},
+		{"./missing-agent", "./missing-agent"},
+		{"Remote-Agent", "Remote-Agent"},
+		{"https://github.com/acme/agents/example", "https://github.com/acme/agents/example"},
+	}
+	for _, tt := range tests {
+		got, err := resolveZotfileRef(tt.ref)
+		if err != nil {
+			t.Fatalf("resolve %q: %v", tt.ref, err)
+		}
+		if got != tt.want {
+			t.Errorf("resolve %q = %q, want %q", tt.ref, got, tt.want)
+		}
+	}
+}
+
 func TestLoadZotfileRejectsBundledExecutableExtension(t *testing.T) {
 	dir := writeTestZotfile(t, `{"zotfile":1,"name":"test"}`)
 	ext := filepath.Join(dir, "extensions", "bad")

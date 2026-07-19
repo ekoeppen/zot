@@ -1,8 +1,8 @@
-# Zotfile agents
+# zotfile agents
 
-A Zotfile packages an agent's behavior into one portable `.zot` file. It can contain the agent's instructions, reusable skills, static assets, and metadata describing the runtime, model, operating-system, binary, and tool permissions it needs.
+A zotfile packages an agent's behavior into one portable `.zot` file. It can contain the agent's instructions, reusable skills, static assets, and metadata describing the runtime, model, operating-system, binary, and tool permissions it needs.
 
-The current implementation supports creating, inspecting, verifying, and running local directories and `.zot` archives. It can also run an agent directory directly from a public GitHub repository without keeping a clone. Registry distribution, installation, signatures, bundled executable extensions, network permissions, and environment permissions are not implemented yet.
+The current implementation supports creating, inspecting, verifying, and running local directories and `.zot` archives. It can also run an agent directory directly from a public GitHub repository without keeping a clone. Short names resolve local-first and then fall back to zot's official GitHub agent collection. Indexed registry distribution, installation, signatures, bundled executable extensions, network permissions, and environment permissions are not implemented yet.
 
 ## Quick start
 
@@ -141,7 +141,7 @@ description: Diagnose a failing command from its output and relevant source file
 4. Propose the smallest correction and validation plan.
 ```
 
-Bundled skills are added to normal skill discovery while the Zotfile is running. The model sees their name and description in the skill manifest and can load the full body through the `skill` tool. See [skills.md](skills.md) for the complete skill format.
+Bundled skills are added to normal skill discovery while the zotfile is running. The model sees their name and description in the skill manifest and can load the full body through the `skill` tool. See [skills.md](skills.md) for the complete skill format.
 
 ## Manifest reference
 
@@ -271,7 +271,7 @@ Use `requirements.bin` for commands that must already be on `PATH`:
 }
 ```
 
-Zot checks these requirements before requesting consent. Zotfiles do not have install or postinstall hooks, so authors must document how users can obtain missing programs.
+Zot checks these requirements before requesting consent. These zotfiles do not have install or postinstall hooks, so authors must document how users can obtain missing programs.
 
 ### Entry fields
 
@@ -465,7 +465,7 @@ The directory is created for every run, but the agent can access it only when `$
 
 ## Agent-scoped sessions
 
-Zotfile sessions are isolated from ordinary zot sessions and from other agents:
+Sessions created by a zotfile are isolated from ordinary zot sessions and from other agents:
 
 ```text
 $ZOT_HOME/sessions/agents/<name>/
@@ -494,7 +494,24 @@ zot run ./my-agent.zot --json "Do the task"
 
 Arguments after the reference use zot's normal CLI parser, so model, provider, reasoning, cwd, session, tool, and output-mode flags remain available. The manifest still imposes its permission and compatibility ceiling.
 
-Local filesystem directories, local archive paths, and public GitHub agent-directory URLs are accepted. For GitHub, zot downloads the repository archive into a temporary directory, selects the requested agent subdirectory, validates it, runs it, and removes the downloaded files when the command exits:
+Local filesystem directories, local archive paths, short names, and public GitHub agent-directory URLs are accepted. A short name uses local-first resolution:
+
+```bash
+zot run zot-maintenance
+```
+
+Zot checks `./zot-maintenance` and `./zot-maintenance.zot` before falling back to `https://github.com/patriceckhart/agents/zot-maintenance`. This makes local development override the remote collection without an install or cache step.
+
+A two-part name selects a GitHub repository under the `patriceckhart` organization:
+
+```bash
+zot run agents/zot-maintenance
+zot run agents\zot-maintenance  # also accepted on Windows
+```
+
+The first part is the repository and the second part is the agent directory. Both parts must use lowercase letters, digits, dots, hyphens, or underscores. Prefix a reference with `./`, use an absolute path, retain the `.zot` suffix, or provide a complete GitHub URL when remote fallback is not wanted.
+
+For GitHub, zot downloads the repository archive into a temporary directory, selects the requested agent subdirectory, validates it, runs it, and removes the downloaded files when the command exits:
 
 ```bash
 zot run https://github.com/patriceckhart/agents/zot-maintenance --cwd /path/to/zot
@@ -508,7 +525,7 @@ zot run https://github.com/patriceckhart/agents/tree/main/zot-maintenance
 
 The short form reads the repository's default branch through GitHub's `HEAD` archive. A tree URL uses the branch or tag in the URL. Private repositories and GitHub references containing `/` are not currently supported. The downloaded source is temporary, but normal agent data, consent receipts, and session transcripts remain under `$ZOT_HOME`.
 
-Installed names, arbitrary URLs, registry references, and OCI references are not resolved yet.
+Short-name fallback is a fixed GitHub mapping, not an indexed or signed registry. Installed names, arbitrary URLs, OCI references, and third-party registry configuration are not resolved yet.
 
 ### `zot pack`
 
@@ -578,6 +595,7 @@ Archive extraction rejects absolute paths and parent traversal. Unsupported tar 
 Implemented now:
 
 - local directories and `.zot` archives
+- local-first short-name resolution to the official GitHub agent collection
 - temporary execution of agent directories from public GitHub repositories
 - `zot pack`, `zot inspect`, `zot verify`, and `zot run`
 - canonical tar creation with zstd compression
@@ -595,7 +613,7 @@ Implemented now:
 Not implemented yet:
 
 - `zot install`, `zot agents`, `zot use`, `zot update`, or `zot publish`
-- installed-name, arbitrary URL, OCI, or zot.sh index resolution
+- installed-name, arbitrary URL, OCI, configurable registry, or zot.sh index resolution
 - network allowlist enforcement
 - environment-variable filtering
 - safely confined bundled executable extensions
@@ -604,4 +622,4 @@ Not implemented yet:
 - per-agent Telegram, bot, or RPC selection
 - `--no-sandbox`, `--trust-bash`, or registry trust override flags
 
-Treat the unsupported fields and commands in the broader Zotfile proposal as forward-looking design, not as current runtime behavior.
+Treat the unsupported fields and commands in the broader zotfile proposal as forward-looking design, not as current runtime behavior.
