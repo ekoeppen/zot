@@ -96,6 +96,23 @@ func (c *Client) GetMe(ctx context.Context) (*User, error) {
 	return &resp.Result, nil
 }
 
+// DeleteWebhook removes any webhook so the bot can receive updates through
+// long polling. Pending updates are preserved unless dropPendingUpdates is true.
+func (c *Client) DeleteWebhook(ctx context.Context, dropPendingUpdates bool) error {
+	body := map[string]any{"drop_pending_updates": dropPendingUpdates}
+	var resp apiResponse[bool]
+	if err := c.call(ctx, "deleteWebhook", body, &resp); err != nil {
+		return err
+	}
+	if !resp.OK {
+		return fmt.Errorf("deleteWebhook: %s", resp.Description)
+	}
+	if !resp.Result {
+		return fmt.Errorf("deleteWebhook: telegram did not remove the webhook")
+	}
+	return nil
+}
+
 // GetUpdates polls for new updates since offset with a long-poll timeout.
 func (c *Client) GetUpdates(ctx context.Context, offset int64, timeoutSec int) ([]Update, error) {
 	q := url.Values{}

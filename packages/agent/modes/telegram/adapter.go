@@ -37,6 +37,9 @@ func (a *Adapter) Run(ctx context.Context,
 	if err != nil {
 		return fmt.Errorf("getMe: %w", err)
 	}
+	if err := a.Client.DeleteWebhook(ctx, false); err != nil {
+		return fmt.Errorf("remove telegram webhook before polling: %w", err)
+	}
 	// Keep the stored username/id in sync with the actual bot.
 	if a.Cfg.BotID != me.ID || a.Cfg.BotUsername != me.Username {
 		a.Cfg.BotID = me.ID

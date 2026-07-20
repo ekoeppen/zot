@@ -18,6 +18,7 @@ import (
 	"github.com/patriceckhart/zot/packages/agent/modes/telegram"
 	"github.com/patriceckhart/zot/packages/core"
 	"github.com/patriceckhart/zot/packages/provider"
+	"golang.org/x/term"
 )
 
 // detachChild configures cmd to run in its own process group so tty
@@ -394,7 +395,30 @@ config & state:
 `)
 }
 
-// telegramBotSetup interactively reads a bot token, verifies it via getMe, and saves it.
+var (
+	botTokenIsTerminal   = term.IsTerminal
+	botTokenReadPassword = term.ReadPassword
+)
+
+func readBotToken(in *os.File, out io.Writer) (string, error) {
+	if botTokenIsTerminal(int(in.Fd())) {
+		value, err := botTokenReadPassword(int(in.Fd()))
+		fmt.Fprintln(out)
+		if err != nil {
+			return "", fmt.Errorf("read telegram bot token: %w", err)
+		}
+		return string(value), nil
+	}
+
+	value, err := bufio.NewReader(in).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("read telegram bot token: %w", err)
+	}
+	return value, nil
+}
+
+// telegramBotSetup interactively reads a bot token without echoing it on a
+// terminal, verifies it via getMe, and saves it.
 func telegramBotSetup(_ []string) error {
 	cfg, err := telegram.LoadConfig(ZotHome())
 	if err != nil {
@@ -402,8 +426,7 @@ func telegramBotSetup(_ []string) error {
 	}
 
 	fmt.Print("telegram bot token (from @BotFather): ")
-	reader := bufio.NewReader(os.Stdin)
-	line, err := reader.ReadString('\n')
+	line, err := readBotToken(os.Stdin, os.Stdout)
 	if err != nil {
 		return err
 	}

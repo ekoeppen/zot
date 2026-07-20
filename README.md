@@ -867,6 +867,8 @@ Setup flow:
 
 From then on, any DM you send is forwarded to the agent as a user prompt. Attached photos or `image/*` documents are downloaded and passed to vision-capable models. In-bot telegram commands: `/help`, `/status`, `/stop` (cancel the current turn). Config lives in `$ZOT_HOME/bot.json` (mode 0600).
 
+Starting either Telegram bridge removes any webhook configured for that bot before long polling begins, while preserving pending updates. Telegram does not allow webhooks and `getUpdates` polling at the same time, so do not share the bot token with another service that expects to keep a webhook active.
+
 Bot mode respects the usual zot flags: `--provider`, `--model`, `--cwd`, `--reasoning`, `--continue`, `--no-session`, `--no-tools`, and so on. Run `zot tg run -c --model claude-opus-4-1` to resume the latest session on Opus, for example.
 
 ### Architecture: protocol-agnostic bot core

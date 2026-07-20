@@ -115,6 +115,10 @@ func (b *Bridge) Start(parent context.Context) error {
 		cancel()
 		return fmt.Errorf("getMe: %w", err)
 	}
+	if err := b.Client.DeleteWebhook(ctx, false); err != nil {
+		cancel()
+		return fmt.Errorf("remove telegram webhook before polling: %w", err)
+	}
 
 	b.mu.Lock()
 	b.running = true
