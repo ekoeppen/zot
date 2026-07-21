@@ -461,7 +461,7 @@ func TestOpenCodeGoCatalog(t *testing.T) {
 		cacheRead float64
 	}{
 		{"grok-4.5", 500000, 500000, 2, 6, 0.3},
-		{"kimi-k3", 262144, 131072, 3, 15, 0.3},
+		{"kimi-k3", 1048576, 131072, 3, 15, 0.3},
 	}
 	for _, tc := range cases {
 		m, err := FindModel("opencode-go", tc.id)
