@@ -7,9 +7,8 @@ This extension reads MCP server configurations from standard locations (same for
 ## Features
 
 - **Standard config format** — same JSON as Claude Desktop, Cursor, Cline
-- **On-demand tool discovery** — only `mcp__search_tools` is advertised initially; matching MCP schemas load when needed instead of bloating every model request
-- **Smart lazy loading** — cached definitions register as deferred tools at startup, servers wake for refresh or tool calls, then auto-sleep after idle time
-- **Auto-respawn** — calling a loaded tool on a sleeping server wakes it up automatically
+- **Smart lazy loading** — cached tools register at startup, servers wake for refresh or tool calls, then auto-sleep after idle time
+- **Auto-respawn** — calling a tool on a sleeping server wakes it up automatically
 - **Multi-transport** — stdio, streamable-http, and SSE transports
 - **Multi-server** — connect to any number of MCP servers simultaneously
 - **Tool namespacing** — tools appear as `mcp__<server>__<tool>` to avoid collisions
@@ -54,9 +53,7 @@ This extension reads MCP server configurations from standard locations (same for
    zot ext install .
    ```
 
-4. **Restart zot.** On first run the extension refreshes its tool cache in the background. When zot shows `MCP tool cache changed`, run `/reload-ext` once. Future launches register the cached MCP tools immediately as deferred definitions.
-
-The model initially sees one small loader tool, `mcp__search_tools`. It searches cached MCP tool names and descriptions locally, activates up to eight relevant definitions by default, and then calls the selected MCP tool normally. This keeps large MCP installations compatible with providers that limit request or tool-schema size.
+4. **Restart zot.** On first run the extension refreshes its tool cache in the background. When zot shows `MCP tool cache changed`, run `/reload-ext` once. Future launches register the cached MCP tools immediately.
 
 ## Configuration
 
