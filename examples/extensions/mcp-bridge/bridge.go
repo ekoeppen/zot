@@ -24,10 +24,35 @@ import (
 	"github.com/patriceckhart/zot/packages/agent/ext"
 )
 
+const (
+	mcpSearchToolName      = "mcp__search_tools"
+	defaultToolSearchLimit = 8
+	maxToolSearchLimit     = 20
+)
+
+var mcpSearchToolSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "Words describing the MCP capability needed, such as 'search GitHub code' or 'list n8n workflows'."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20,
+      "description": "Maximum number of matching tools to load. Defaults to 8."
+    }
+  },
+  "required": ["query"],
+  "additionalProperties": false
+}`)
+
 // toolMapping tracks which zot tool name maps to which MCP server + tool.
 type toolMapping struct {
-	serverName string // e.g. "filesystem"
-	mcpTool    string // e.g. "read_file"
+	serverName  string // e.g. "filesystem"
+	mcpTool     string // e.g. "read_file"
+	description string
 }
 
 // bridge connects MCP servers to zot's extension protocol.
@@ -42,7 +67,8 @@ type bridge struct {
 	mapping map[string]toolMapping // zot tool name → MCP server + tool; guarded by mu
 	logger  *log.Logger
 
-	mu sync.Mutex // guards mapping
+	mu               sync.Mutex // guards mapping and searchRegistered
+	searchRegistered bool
 }
 
 // newBridge creates a new MCP→zot bridge.
@@ -85,9 +111,30 @@ func (b *bridge) loadServers(cfg Config) {
 	}
 }
 
+// registerToolSearch exposes the only eager MCP tool definition. The actual
+// MCP tools stay deferred until this local catalog search activates a small,
+// relevant subset. This keeps large MCP installations from bloating every LLM
+// request and is required by providers with tight tool-schema size limits.
+func (b *bridge) registerToolSearch() {
+	b.mu.Lock()
+	if b.searchRegistered {
+		b.mu.Unlock()
+		return
+	}
+	b.searchRegistered = true
+	b.mu.Unlock()
+
+	b.e.Tool(mcpSearchToolName,
+		"Search configured MCP tools by capability and load the matching tool definitions. Use this before calling an MCP tool that is not already available.",
+		mcpSearchToolSchema,
+		b.searchTools,
+	)
+}
+
 // registerCachedTools registers previously discovered tool definitions without
 // starting MCP servers. Tool calls still lazy-start the owning server on demand.
 func (b *bridge) registerCachedTools(cache toolCache) int {
+	b.registerToolSearch()
 	count := 0
 	for serverName, srv := range b.servers {
 		cached, ok := cache.Servers[serverName]
@@ -186,14 +233,129 @@ func (b *bridge) registerCachedTool(serverName string, tool cachedTool) {
 		}
 		return
 	}
-	b.mapping[zotName] = toolMapping{serverName: serverName, mcpTool: tool.Name}
+	b.mapping[zotName] = toolMapping{
+		serverName:  serverName,
+		mcpTool:     tool.Name,
+		description: tool.Description,
+	}
 	b.mu.Unlock()
 
-	b.e.Tool(zotName, tool.Description, json.RawMessage(tool.Schema), func(args json.RawMessage) ext.ToolResult {
+	b.e.DeferredTool(zotName, tool.Description, json.RawMessage(tool.Schema), func(args json.RawMessage) ext.ToolResult {
 		return b.handleToolCall(zotName, args)
 	})
 
-	b.logger.Printf("registered cached tool: %s → %s/%s", zotName, serverName, tool.Name)
+	b.logger.Printf("registered deferred cached tool: %s → %s/%s", zotName, serverName, tool.Name)
+}
+
+type toolSearchArgs struct {
+	Query string `json:"query"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+type toolSearchMatch struct {
+	name        string
+	description string
+	score       int
+}
+
+func (b *bridge) searchTools(raw json.RawMessage) ext.ToolResult {
+	var args toolSearchArgs
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return ext.TextErrorResult(mcpSearchToolName + ": invalid arguments: " + err.Error())
+	}
+	query := strings.TrimSpace(args.Query)
+	if query == "" {
+		return ext.TextResult("No MCP tools loaded: provide a non-empty capability query.")
+	}
+	limit := args.Limit
+	if limit == 0 {
+		limit = defaultToolSearchLimit
+	}
+	if limit < 1 || limit > maxToolSearchLimit {
+		return ext.TextErrorResult(fmt.Sprintf("%s: limit must be between 1 and %d", mcpSearchToolName, maxToolSearchLimit))
+	}
+
+	matches := b.findTools(query, limit)
+	if len(matches) == 0 {
+		return ext.TextResult(fmt.Sprintf("No MCP tools matched %q. Try broader capability words or an MCP server name.", query))
+	}
+
+	var text strings.Builder
+	fmt.Fprintf(&text, "Loaded %d MCP tool(s) matching %q:\n", len(matches), query)
+	activated := make([]string, 0, len(matches))
+	for _, match := range matches {
+		activated = append(activated, match.name)
+		fmt.Fprintf(&text, "- %s", match.name)
+		if match.description != "" {
+			fmt.Fprintf(&text, ": %s", match.description)
+		}
+		text.WriteByte('\n')
+	}
+	text.WriteString("Call the appropriate loaded tool now. Search again if none fits the task.")
+	return ext.ToolResult{
+		Content:       []ext.ToolContent{ext.Text(text.String())},
+		ActivateTools: activated,
+	}
+}
+
+func (b *bridge) findTools(query string, limit int) []toolSearchMatch {
+	terms := strings.Fields(strings.ToLower(query))
+	if len(terms) == 0 || limit <= 0 {
+		return nil
+	}
+
+	b.mu.Lock()
+	matches := make([]toolSearchMatch, 0, len(b.mapping))
+	for name, mapping := range b.mapping {
+		score := scoreToolMatch(terms, name, mapping)
+		if score > 0 {
+			matches = append(matches, toolSearchMatch{name: name, description: mapping.description, score: score})
+		}
+	}
+	b.mu.Unlock()
+
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].score != matches[j].score {
+			return matches[i].score > matches[j].score
+		}
+		return matches[i].name < matches[j].name
+	})
+	if len(matches) > limit {
+		matches = matches[:limit]
+	}
+	return matches
+}
+
+func scoreToolMatch(terms []string, zotName string, mapping toolMapping) int {
+	name := strings.ToLower(zotName)
+	server := strings.ToLower(mapping.serverName)
+	mcpName := strings.ToLower(mapping.mcpTool)
+	description := strings.ToLower(mapping.description)
+	score := 0
+	matched := 0
+	for _, term := range terms {
+		termScore := 0
+		switch {
+		case term == mcpName || term == name:
+			termScore = 100
+		case strings.Contains(mcpName, term):
+			termScore = 60
+		case strings.Contains(server, term):
+			termScore = 40
+		case strings.Contains(name, term):
+			termScore = 30
+		case strings.Contains(description, term):
+			termScore = 15
+		}
+		if termScore > 0 {
+			matched++
+			score += termScore
+		}
+	}
+	if matched == len(terms) {
+		score += 25
+	}
+	return score
 }
 
 func mcpToolDescription(serverName string, tool mcp.Tool) string {

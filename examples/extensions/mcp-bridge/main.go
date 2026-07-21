@@ -45,7 +45,7 @@ import (
 )
 
 func main() {
-	e := ext.New("mcp", "1.0.0")
+	e := ext.New("mcp", "1.1.0")
 
 	// Logger writes to stderr (captured by zot into ext logs)
 	logger := log.New(os.Stderr, "[mcp-bridge] ", log.LstdFlags)
@@ -78,6 +78,7 @@ func main() {
 
 		b = newBridge(e, cwd, logger)
 		b.loadServers(cfg)
+		b.registerToolSearch()
 
 		cachePath := toolCachePath()
 		cache, err := readToolCache(cachePath)

@@ -411,11 +411,12 @@ func (c *bedrockClient) buildRequest(req Request) (*bedrockRequest, error) {
 		}
 		out.Messages = append(out.Messages, bm)
 	}
-	if len(req.Tools) > 0 {
+	activeTools := activeToolDefinitions(req.Tools, req.Messages)
+	if len(activeTools) > 0 {
 		tc := struct {
 			Tools []bedrockToolSpec `json:"tools"`
 		}{}
-		for _, t := range req.Tools {
+		for _, t := range activeTools {
 			var ts bedrockToolSpec
 			ts.ToolSpec.Name = t.Name
 			ts.ToolSpec.Description = t.Description

@@ -151,13 +151,14 @@ func (c *geminiClient) buildRequest(req Request) (*gemRequest, string, error) {
 	}
 
 	functionsEnabled := geminiSupportsFunctionCalling(m.ID)
+	activeTools := activeToolDefinitions(req.Tools, req.Messages)
 
 	// Convert tool defs. Gemini image-generation models reject function
 	// declarations with "Function calling is not enabled for this model";
 	// for those models, send a direct multimodal prompt instead.
-	if functionsEnabled && len(req.Tools) > 0 {
-		decls := make([]gemFunctionDecl, 0, len(req.Tools))
-		for _, t := range req.Tools {
+	if functionsEnabled && len(activeTools) > 0 {
+		decls := make([]gemFunctionDecl, 0, len(activeTools))
+		for _, t := range activeTools {
 			schema := sanitizeGeminiToolSchema(t.Schema)
 			decls = append(decls, gemFunctionDecl{
 				Name:        t.Name,

@@ -38,29 +38,99 @@ func TestKimiK3DeferredToolsLoadAtToolResult(t *testing.T) {
 }
 
 func TestDeferredToolsFallbackToActiveTopLevelDefinitions(t *testing.T) {
-	client := NewOpenAI("token", "").(*openaiClient)
 	tools := []Tool{
 		{Name: "base", Schema: json.RawMessage(`{"type":"object"}`)},
 		{Name: "late", Schema: json.RawMessage(`{"type":"object"}`), Deferred: true},
 	}
-	wire, err := client.buildRequest(Request{Model: "gpt-5", Tools: tools})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(wire.Tools) != 1 || wire.Tools[0].Function.Name != "base" {
-		t.Fatalf("initial tools = %+v", wire.Tools)
+	builders := map[string]func(Request) ([]string, error){
+		"openai": func(req Request) ([]string, error) {
+			wire, err := NewOpenAI("token", "").(*openaiClient).buildRequest(req)
+			if err != nil {
+				return nil, err
+			}
+			names := make([]string, 0, len(wire.Tools))
+			for _, tool := range wire.Tools {
+				names = append(names, tool.Function.Name)
+			}
+			return names, nil
+		},
+		"anthropic": func(req Request) ([]string, error) {
+			req.Model = "claude-sonnet-4-6"
+			wire, err := NewAnthropic("token", "").(*anthropicClient).buildRequest(req)
+			if err != nil {
+				return nil, err
+			}
+			names := make([]string, 0, len(wire.Tools))
+			for _, tool := range wire.Tools {
+				names = append(names, tool.Name)
+			}
+			return names, nil
+		},
+		"bedrock": func(req Request) ([]string, error) {
+			req.Model = "anthropic.claude-sonnet-4-5-20250929-v1:0"
+			wire, err := (&bedrockClient{region: "us-east-1"}).buildRequest(req)
+			if err != nil {
+				return nil, err
+			}
+			if wire.ToolConfig == nil {
+				return nil, nil
+			}
+			names := make([]string, 0, len(wire.ToolConfig.Tools))
+			for _, tool := range wire.ToolConfig.Tools {
+				names = append(names, tool.ToolSpec.Name)
+			}
+			return names, nil
+		},
+		"gemini": func(req Request) ([]string, error) {
+			req.Model = "gemini-2.5-pro"
+			wire, _, err := NewGemini("token", "").(*geminiClient).buildRequest(req)
+			if err != nil {
+				return nil, err
+			}
+			var names []string
+			for _, group := range wire.Tools {
+				for _, tool := range group.FunctionDeclarations {
+					names = append(names, tool.Name)
+				}
+			}
+			return names, nil
+		},
+		"openai-codex": func(req Request) ([]string, error) {
+			req.Model = "gpt-5.5"
+			wire, err := NewOpenAICodex("token", "account", "").(*codexClient).buildRequest(req)
+			if err != nil {
+				return nil, err
+			}
+			names := make([]string, 0, len(wire.Tools))
+			for _, tool := range wire.Tools {
+				names = append(names, tool.Name)
+			}
+			return names, nil
+		},
 	}
 
-	wire, err = client.buildRequest(Request{
-		Model:    "gpt-5",
-		Tools:    tools,
-		Messages: []Message{{Role: RoleTool, AddedToolNames: []string{"late"}}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(wire.Tools) != 2 {
-		t.Fatalf("activated tools = %+v, want both definitions", wire.Tools)
+	for name, build := range builders {
+		t.Run(name, func(t *testing.T) {
+			initial, err := build(Request{Model: "gpt-5", Tools: tools})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(initial) != 1 || initial[0] != "base" {
+				t.Fatalf("initial tools = %v, want [base]", initial)
+			}
+
+			activated, err := build(Request{
+				Model:    "gpt-5",
+				Tools:    tools,
+				Messages: []Message{{Role: RoleTool, AddedToolNames: []string{"late"}}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(activated) != 2 || activated[0] != "base" || activated[1] != "late" {
+				t.Fatalf("activated tools = %v, want [base late]", activated)
+			}
+		})
 	}
 }
 

@@ -191,9 +191,10 @@ func (c *codexClient) buildRequest(req Request) (*codexRequest, error) {
 			body.Reasoning = &codexReasoningConfig{Effort: effort}
 		}
 	}
-	if len(req.Tools) > 0 {
+	activeTools := activeToolDefinitions(req.Tools, req.Messages)
+	if len(activeTools) > 0 {
 		body.ToolChoice = "auto"
-		for _, t := range req.Tools {
+		for _, t := range activeTools {
 			params := t.Schema
 			if len(params) == 0 {
 				params = json.RawMessage(`{"type":"object","properties":{}}`)
