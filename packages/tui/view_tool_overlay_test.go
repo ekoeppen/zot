@@ -74,6 +74,28 @@ func TestLiveToolOverlayHeightDoesNotShrinkMidStream(t *testing.T) {
 	}
 }
 
+func TestLiveToolReservationResetsWhenExpansionChanges(t *testing.T) {
+	args := json.RawMessage(`{"path":"sample.ts","content":"line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11\nline12\nline13\nline14\nline15\nline16\nline17\nline18\nline19\nline20"}`)
+	v := View{
+		Theme: Dark,
+		ToolCalls: []ToolCallView{
+			{ID: "toolu_1", Name: "write", RawJSONBuf: string(args), LivePath: "sample.ts"},
+		},
+	}
+
+	collapsedRows := len(v.Build(80))
+	v.ExpandAll = true
+	expandedRows := len(v.Build(80))
+	if expandedRows <= collapsedRows {
+		t.Fatalf("expanded live box did not grow: collapsed=%d expanded=%d", collapsedRows, expandedRows)
+	}
+
+	v.ExpandAll = false
+	if got := len(v.Build(80)); got != collapsedRows {
+		t.Fatalf("collapsed live box kept expanded height: got %d rows, want %d", got, collapsedRows)
+	}
+}
+
 func TestLiveToolReservationDoesNotLeakToNextCall(t *testing.T) {
 	v := View{Theme: Dark}
 	tall := json.RawMessage(`{"command":"line1\nline2\nline3\nline4\nline5"}`)
