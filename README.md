@@ -490,7 +490,7 @@ For direct Moonshot API keys or a custom compatible endpoint:
 zot --provider kimi --model kimi-k2-0905-preview --base-url https://api.moonshot.ai/v1 --api-key "$KIMI_API_KEY"
 ```
 
-Kimi K3 is built in as `kimi/k3`, `moonshotai/kimi-k3`, `moonshotai-cn/kimi-k3`, `openrouter/moonshotai/kimi-k3`, and `vercel-ai-gateway/moonshotai/kimi-k3`. Its output limit is 131,072 tokens on every built-in route.
+Kimi K3 is built in as `kimi/k3`, `moonshotai/kimi-k3`, `moonshotai-cn/kimi-k3`, `opencode-go/kimi-k3`, `openrouter/moonshotai/kimi-k3`, and `vercel-ai-gateway/moonshotai/kimi-k3`. Its output limit is 131,072 tokens on every built-in route.
 
 You can add additional Kimi/Moonshot model IDs to `models.json` under the `kimi` provider.
 
