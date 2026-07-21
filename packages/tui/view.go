@@ -906,7 +906,7 @@ func (v *View) renderToolCall(tc ToolCallView, width int) []string {
 			lines = append(lines, compactToolBlank(v.Theme, width))
 		}
 		lines = append(lines, toolHeaderLine(v.Theme, label, width, v.CompactMode))
-		body := toolResultBlock(v.Theme, bodyText, flatToolBodyRenderWidth(width), color)
+		body := v.renderLiveToolResult(bodyText, flatToolBodyRenderWidth(width), color, tc.LivePath)
 		for _, l := range v.collapseToolBody(body, false) {
 			_, stripped := parseImageFootprint(l)
 			lines = append(lines, toolBodyLine(v.Theme, stripped, width, v.CompactMode))
@@ -918,7 +918,7 @@ func (v *View) renderToolCall(tc ToolCallView, width int) []string {
 	}
 	lines = append(lines, toolBoxTop(v.Theme, label, width))
 	lines = append(lines, toolBoxSide(v.Theme, "", width))
-	body := toolResultBlock(v.Theme, bodyText, toolBoxBodyRenderWidth(width), color)
+	body := v.renderLiveToolResult(bodyText, toolBoxBodyRenderWidth(width), color, tc.LivePath)
 	for _, l := range v.collapseToolBody(body, false) {
 		imgCells, stripped := parseImageFootprint(l)
 		if hasImageEscapeLine(stripped) {
@@ -930,6 +930,13 @@ func (v *View) renderToolCall(tc ToolCallView, width int) []string {
 	lines = append(lines, toolBoxSide(v.Theme, "", width))
 	lines = append(lines, toolBoxBottom(v.Theme, width))
 	return lines
+}
+
+// renderLiveToolResult uses the transcript's text renderer so every rich
+// confirmation preview immediately gets the same colors, numbered gutters,
+// and syntax highlighting as its final tool result.
+func (v *View) renderLiveToolResult(text string, width, color int, sourcePath string) []string {
+	return v.renderToolText(text, width, color, sourcePath, 1)
 }
 
 // renderLiveToolBody renders the in-flight preview of a streaming

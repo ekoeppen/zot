@@ -87,10 +87,19 @@ func TestEditConfirmationPreviewRendersDiffInsteadOfNewText(t *testing.T) {
 		}},
 	}
 
-	plain := stripANSI(strings.Join(v.Build(80), "\n"))
-	for _, want := range []string{"-old value", "+new value"} {
+	rendered := strings.Join(v.Build(80), "\n")
+	plain := stripANSI(rendered)
+	for _, want := range []string{"-  1 old value", "+  1 new value"} {
 		if !strings.Contains(plain, want) {
-			t.Fatalf("confirmation preview missing %q:\n%s", want, plain)
+			t.Fatalf("confirmation preview missing numbered diff row %q:\n%s", want, plain)
+		}
+	}
+	for _, want := range []string{
+		Dark.FG256(Dark.Error, "-  1 "),
+		Dark.FG256(Dark.Tool, "+  1 "),
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("confirmation preview missing diff color %q:\n%s", want, rendered)
 		}
 	}
 	if strings.Contains(plain, "edit 1 (streaming)") {
