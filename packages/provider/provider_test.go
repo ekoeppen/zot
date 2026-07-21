@@ -447,9 +447,10 @@ func TestGPT56CatalogEntries(t *testing.T) {
 	}
 }
 
-// TestOpenCodeGoCatalog pins the Grok 4.5 entry added to the OpenCode Go
-// provider. It is listed in the vendor's current Go model lineup
-// (https://opencode.ai/docs/go) and was missing from the baked-in catalog.
+// TestOpenCodeGoCatalog pins the Grok 4.5 and Kimi K3 entries added to
+// the OpenCode Go provider. Both are listed in the vendor's current Go
+// model lineup (https://opencode.ai/docs/go) and were missing from the
+// baked-in catalog.
 func TestOpenCodeGoCatalog(t *testing.T) {
 	cases := []struct {
 		id        string
@@ -460,6 +461,7 @@ func TestOpenCodeGoCatalog(t *testing.T) {
 		cacheRead float64
 	}{
 		{"grok-4.5", 500000, 500000, 2, 6, 0.3},
+		{"kimi-k3", 262144, 131072, 3, 15, 0.3},
 	}
 	for _, tc := range cases {
 		m, err := FindModel("opencode-go", tc.id)
