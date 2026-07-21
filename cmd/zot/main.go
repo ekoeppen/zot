@@ -4,6 +4,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
+	"strings"
 
 	"github.com/patriceckhart/zot/packages/agent"
 )
@@ -22,7 +24,7 @@ var (
 )
 
 func main() {
-	v := version
+	v := resolvedVersion(version)
 	if commit != "" {
 		short := commit
 		if len(short) > 7 {
@@ -38,4 +40,22 @@ func main() {
 		fmt.Fprintln(os.Stderr, "zot:", err)
 		os.Exit(1)
 	}
+}
+
+// resolvedVersion falls back to the module version embedded by Go when zot is
+// installed with "go install ...@version". Release archives still use the
+// version injected by GoReleaser, and local source builds remain 0.0.0.
+func resolvedVersion(linkedVersion string) string {
+	info, _ := debug.ReadBuildInfo()
+	return resolvedVersionFromBuildInfo(linkedVersion, info)
+}
+
+func resolvedVersionFromBuildInfo(linkedVersion string, info *debug.BuildInfo) string {
+	if linkedVersion != "" && linkedVersion != "0.0.0" {
+		return linkedVersion
+	}
+	if info == nil || info.Main.Version == "" || info.Main.Version == "(devel)" {
+		return linkedVersion
+	}
+	return strings.TrimPrefix(info.Main.Version, "v")
 }

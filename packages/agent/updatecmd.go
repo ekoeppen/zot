@@ -68,9 +68,9 @@ usage:
 notes:
   * The binary must be writable by the current user. On a system-wide
     install (e.g. /usr/local/bin/zot owned by root) re-run with sudo.
-  * Dev builds (version 0.0.0) are refused — they typically come from
-    'go install' or a local 'make build' and shouldn't be silently
-    replaced with a release binary.
+  * Dev builds (version 0.0.0) are refused. They typically come from
+    a local source build and shouldn't be silently replaced with a
+    release binary.
   * Honours $GITHUB_TOKEN if set, so private-repo releases work.
   * After the binary is installed, every extension under
     $ZOT_HOME/extensions/ that is a git checkout is fast-forward

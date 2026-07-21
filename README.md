@@ -56,6 +56,8 @@ Drops `zot.exe` into `$HOME\bin` and adds it to the user PATH if missing. Open a
 go install github.com/patriceckhart/zot/cmd/zot@latest
 ```
 
+The installed binary reports the tagged module version and supports `zot update`.
+
 ### From source
 
 ```bash
