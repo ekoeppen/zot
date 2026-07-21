@@ -1795,6 +1795,25 @@ func (i *Interactive) clearFileSuggestQuery() {
 	}
 }
 
+// setToolExpansion updates long tool result expansion and replays the
+// transcript so already-emitted rows reflect the new state.
+func (i *Interactive) setToolExpansion(expanded bool) {
+	i.mu.Lock()
+	i.view.ExpandAll = expanded
+	if i.rend != nil {
+		i.rend.Clear()
+	}
+	i.mu.Unlock()
+	i.invalidate()
+}
+
+func (i *Interactive) toggleToolExpansion() {
+	i.mu.Lock()
+	expanded := !i.view.ExpandAll
+	i.mu.Unlock()
+	i.setToolExpansion(expanded)
+}
+
 func (i *Interactive) handleKey(ctx context.Context, k tui.Key) (done bool) {
 	// Any key that isn't ctrl+c invalidates an armed ctrl+c-exit, so
 	// pressing ctrl+c then typing then ctrl+c much later doesn't quit
@@ -1814,8 +1833,13 @@ func (i *Interactive) handleKey(ctx context.Context, k tui.Key) (done bool) {
 
 	// Confirm dialog has highest priority: the agent goroutine is
 	// blocked waiting for an answer, so we must not let keys leak
-	// anywhere else while it's up.
+	// anywhere else while it's up. Ctrl+O remains available so the
+	// user can expand or collapse a tool preview before deciding.
 	if i.confirmDialog.Active() {
+		if k.Kind == tui.KeyCtrlO {
+			i.toggleToolExpansion()
+			return false
+		}
 		i.confirmDialog.HandleKey(k)
 		i.invalidate()
 		return false
@@ -2163,18 +2187,7 @@ func (i *Interactive) handleKey(ctx context.Context, k tui.Key) (done bool) {
 		i.pasteClipboard()
 		return false
 	case tui.KeyCtrlO:
-		// Toggle expansion of collapsed tool results. Affects every tool
-		// call in the transcript — press again to re-collapse.
-		// In main-screen scrollback mode this changes already-emitted
-		// transcript rows, so do a full clear+replay instead of trying
-		// to edit old scrollback in place.
-		i.mu.Lock()
-		i.view.ExpandAll = !i.view.ExpandAll
-		if i.rend != nil {
-			i.rend.Clear()
-		}
-		i.mu.Unlock()
-		i.invalidate()
+		i.toggleToolExpansion()
 		return false
 	case tui.KeyPageUp:
 		i.scrollBy(+i.chatPage())

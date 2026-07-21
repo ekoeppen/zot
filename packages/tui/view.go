@@ -130,7 +130,8 @@ type View struct {
 	// shrinks mid-stream. Keyed by ToolCallView.ID. Entries are only
 	// consulted while a call has no Result; interactive mode prunes
 	// the map when a turn ends.
-	liveBodyHigh map[string]int
+	liveBodyHigh      map[string]int
+	liveBodyExpandAll bool
 
 	// FlatTools renders tool calls without the bordered panel: a quiet
 	// header line per call plus indented, frameless output. The
@@ -255,6 +256,7 @@ func (v *View) Build(width int) []string {
 // scrollback renderers can keep these rows outside the immutable transcript
 // so native scrolling stays stable while a turn streams.
 func (v *View) BuildLive(width int) []string {
+	v.prepareLiveBodyHeights()
 	var out []string
 	if v.StreamingActive && strings.TrimSpace(v.Streaming) != "" {
 		const indent = "  "
@@ -329,9 +331,7 @@ func (v *View) BuildWithAnchors(width int) ([]string, []MessageAnchor) {
 	if v.renderCache == nil {
 		v.renderCache = make(map[msgCacheKey][]string)
 	}
-	if v.liveBodyHigh == nil {
-		v.liveBodyHigh = make(map[string]int)
-	}
+	v.prepareLiveBodyHeights()
 	// Drop high-water entries for calls that are gone or finalised so
 	// the reservation never leaks into a later, shorter tool box.
 	if len(v.liveBodyHigh) > 0 {
@@ -461,6 +461,16 @@ func (v *View) BuildWithAnchors(width int) ([]string, []MessageAnchor) {
 		out = append(out, "")
 	}
 	return out, anchors
+}
+
+// prepareLiveBodyHeights resets live tool height reservations when ctrl+o
+// changes expansion state. Expanded content must not keep a collapsed box
+// padded to its former full height.
+func (v *View) prepareLiveBodyHeights() {
+	if v.liveBodyHigh == nil || v.liveBodyExpandAll != v.ExpandAll {
+		v.liveBodyHigh = make(map[string]int)
+		v.liveBodyExpandAll = v.ExpandAll
+	}
 }
 
 // refreshToolPaths rebuilds the tool_use_id -> path map from the
