@@ -447,6 +447,39 @@ func TestGPT56CatalogEntries(t *testing.T) {
 	}
 }
 
+// TestOpenCodeGoCatalog pins the Grok 4.5 and Kimi K3 entries added to
+// the OpenCode Go provider. Both are listed in the vendor's current Go
+// model lineup (https://opencode.ai/docs/go) and were missing from the
+// baked-in catalog.
+func TestOpenCodeGoCatalog(t *testing.T) {
+	cases := []struct {
+		id        string
+		context   int
+		maxOut    int
+		priceIn   float64
+		priceOut  float64
+		cacheRead float64
+	}{
+		{"grok-4.5", 500000, 500000, 2, 6, 0.3},
+		{"kimi-k3", 1048576, 131072, 3, 15, 0.3},
+	}
+	for _, tc := range cases {
+		m, err := FindModel("opencode-go", tc.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.ContextWindow != tc.context || m.MaxOutput != tc.maxOut || !m.Reasoning {
+			t.Fatalf("opencode-go/%s limits: %+v", tc.id, m)
+		}
+		if m.PriceInput != tc.priceIn || m.PriceOutput != tc.priceOut || m.PriceCacheRead != tc.cacheRead {
+			t.Fatalf("opencode-go/%s prices: %+v", tc.id, m)
+		}
+		if m.BaseURL != "https://opencode.ai/zen/go/v1" {
+			t.Fatalf("opencode-go/%s baseURL: %s", tc.id, m.BaseURL)
+		}
+	}
+}
+
 // TestOpenAIOmitsZeroMaxTokens guards against sending max_tokens: 0 for
 // discovered models that don't advertise an output cap (MaxOutput == 0).
 func TestOpenAIOmitsZeroMaxTokens(t *testing.T) {
