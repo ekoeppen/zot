@@ -123,6 +123,44 @@ func TestEditSingle(t *testing.T) {
 	}
 }
 
+func TestEditPreviewReturnsDiffWithoutWriting(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(p, []byte("hello world\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := &EditTool{CWD: dir}
+	args := mustJSON(t, map[string]any{
+		"path":  "a.txt",
+		"edits": []map[string]any{{"oldText": "world", "newText": "gopher"}},
+	})
+	preview, err := tool.Preview(context.Background(), args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := preview.Content[0].(provider.TextBlock).Text
+	for _, want := range []string{"-hello world", "+hello gopher"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("preview missing %q:\n%s", want, text)
+		}
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "hello world\n" {
+		t.Fatalf("preview modified file: %q", b)
+	}
+
+	result, err := tool.Execute(context.Background(), args, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Content[0].(provider.TextBlock).Text; got != text {
+		t.Fatalf("executed diff differs from preview:\npreview:\n%s\nresult:\n%s", text, got)
+	}
+}
+
 func TestEditMultiple(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "a.txt")

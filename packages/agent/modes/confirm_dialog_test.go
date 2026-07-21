@@ -3,12 +3,58 @@ package modes
 import (
 	"context"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/patriceckhart/zot/packages/core"
 	"github.com/patriceckhart/zot/packages/tui"
 )
+
+func TestConfirmToolCallAttachesDiffBeforeDecision(t *testing.T) {
+	dialog := newConfirmDialog()
+	i := &Interactive{
+		toolCalls: map[string]*tui.ToolCallView{
+			"call-1": {ID: "call-1", Name: "edit"},
+		},
+		confirmDialog: dialog,
+		dirty:         make(chan struct{}, 1),
+	}
+	decision := make(chan core.ConfirmDecision, 1)
+	go func() {
+		decision <- i.ConfirmToolCall(core.ToolCallConfirmation{
+			ID:      "call-1",
+			Name:    "edit",
+			Summary: "sample.go",
+			Content: "-old\n+new\n",
+		})
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for !dialog.Active() && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+	if !dialog.Active() {
+		t.Fatal("confirmation dialog did not open")
+	}
+	i.mu.Lock()
+	preview := i.toolCalls["call-1"].Preview
+	i.mu.Unlock()
+	if preview != "-old\n+new\n" {
+		t.Fatalf("tool preview = %q", preview)
+	}
+
+	dialog.HandleKey(tui.Key{Kind: tui.KeyEnter})
+	select {
+	case got := <-decision:
+		if !got.Allow {
+			t.Fatalf("confirmation decision = %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("confirmation did not return")
+	}
+}
 
 func TestConfirmDialogAllowsToolExpansion(t *testing.T) {
 	resp := make(chan core.ConfirmDecision, 1)

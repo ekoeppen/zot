@@ -37,6 +37,21 @@ type Confirmer interface {
 	Confirm(toolName string, preview string) ConfirmDecision
 }
 
+// ToolCallConfirmation contains the summary and optional side-effect-free
+// content shown while approving a specific tool call.
+type ToolCallConfirmation struct {
+	ID      string
+	Name    string
+	Summary string
+	Content string
+}
+
+// ToolCallConfirmer is optionally implemented by confirmation UIs that can
+// attach rich preview content to the matching live tool call.
+type ToolCallConfirmer interface {
+	ConfirmToolCall(call ToolCallConfirmation) ConfirmDecision
+}
+
 // ConfirmGate wraps a Confirmer with session-scoped memory for the
 // "allow, always" decisions. Once the user picks RememberTool on a
 // given tool name, the gate short-circuits subsequent calls of that
@@ -70,6 +85,12 @@ func NewConfirmGate(inner Confirmer) *ConfirmGate {
 //
 // A nil ConfirmGate always allows (treat as yolo mode).
 func (g *ConfirmGate) Check(toolName, preview string) (bool, string, json.RawMessage) {
+	return g.CheckToolCall(ToolCallConfirmation{Name: toolName, Summary: preview})
+}
+
+// CheckToolCall behaves like Check and additionally gives rich confirmation
+// UIs the call ID and side-effect-free preview content.
+func (g *ConfirmGate) CheckToolCall(call ToolCallConfirmation) (bool, string, json.RawMessage) {
 	if g == nil {
 		return true, "", nil
 	}
@@ -78,20 +99,22 @@ func (g *ConfirmGate) Check(toolName, preview string) (bool, string, json.RawMes
 		g.mu.Unlock()
 		return true, "", nil
 	}
-	if g.allowedTool[toolName] {
+	if g.allowedTool[call.Name] {
 		g.mu.Unlock()
 		return true, "", nil
 	}
-	g.mu.Unlock()
-
-	g.mu.Lock()
 	inner := g.inner
 	g.mu.Unlock()
 	if inner == nil {
 		return false, "tool call refused: --no-yolo is active and there is no interactive prompt in this mode; ask the user what to do instead", nil
 	}
 
-	decision := inner.Confirm(toolName, preview)
+	var decision ConfirmDecision
+	if detailed, ok := inner.(ToolCallConfirmer); ok {
+		decision = detailed.ConfirmToolCall(call)
+	} else {
+		decision = inner.Confirm(call.Name, call.Summary)
+	}
 
 	g.mu.Lock()
 	if decision.Allow {
@@ -99,7 +122,7 @@ func (g *ConfirmGate) Check(toolName, preview string) (bool, string, json.RawMes
 			g.allowAll = true
 		}
 		if decision.RememberTool {
-			g.allowedTool[toolName] = true
+			g.allowedTool[call.Name] = true
 		}
 	}
 	g.mu.Unlock()

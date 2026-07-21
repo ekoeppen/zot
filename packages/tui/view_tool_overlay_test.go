@@ -74,6 +74,30 @@ func TestLiveToolOverlayHeightDoesNotShrinkMidStream(t *testing.T) {
 	}
 }
 
+func TestEditConfirmationPreviewRendersDiffInsteadOfNewText(t *testing.T) {
+	args := json.RawMessage(`{"path":"sample.go","edits":[{"oldText":"old value","newText":"new value"}]}`)
+	v := View{
+		Theme: Dark,
+		ToolCalls: []ToolCallView{{
+			ID:         "toolu_1",
+			Name:       "edit",
+			RawJSONBuf: string(args),
+			LivePath:   "sample.go",
+			Preview:    "-old value\n+new value\n",
+		}},
+	}
+
+	plain := stripANSI(strings.Join(v.Build(80), "\n"))
+	for _, want := range []string{"-old value", "+new value"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("confirmation preview missing %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "edit 1 (streaming)") {
+		t.Fatalf("confirmation still showed the newText streaming view:\n%s", plain)
+	}
+}
+
 func TestLiveToolReservationResetsWhenExpansionChanges(t *testing.T) {
 	args := json.RawMessage(`{"path":"sample.ts","content":"line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11\nline12\nline13\nline14\nline15\nline16\nline17\nline18\nline19\nline20"}`)
 	v := View{

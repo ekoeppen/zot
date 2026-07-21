@@ -212,12 +212,13 @@ const (
 
 // ToolCallView is a pending tool invocation plus optional result.
 type ToolCallView struct {
-	ID     string
-	Name   string
-	Args   string // rendered argument summary
-	Result string // rendered result preview (truncated)
-	Error  bool
-	Done   bool
+	ID      string
+	Name    string
+	Args    string // rendered argument summary
+	Preview string // side-effect-free result shown before confirmation
+	Result  string // rendered result preview (truncated)
+	Error   bool
+	Done    bool
 
 	// Streaming is true while the model is still typing the tool
 	// call's JSON arguments. The TUI renders a live preview of any
@@ -822,11 +823,11 @@ func (v *View) renderToolCall(tc ToolCallView, width int) []string {
 	// when the overlay disappears.
 
 	// Live body (write/edit): keep the streamed preview visible until
-	// a real tool result arrives. The provider can finish the tool_use
-	// JSON before zot has executed the tool, so keying this on
+	// a proposed or real tool result arrives. The provider can finish the
+	// tool_use JSON before zot has executed the tool, so keying this on
 	// tc.Streaming makes write/edit boxes collapse for a moment between
-	// EvToolUseEnd and EvToolResult.
-	if tc.Result == "" {
+	// EvToolUseEnd and confirmation or EvToolResult.
+	if tc.Preview == "" && tc.Result == "" {
 		if body := v.renderLiveToolBody(tc, width); len(body) > 0 {
 			// Pad the live preview up to the call's high-water height so
 			// it never shrinks mid-stream (e.g. between edit 1 and the
@@ -867,10 +868,15 @@ func (v *View) renderToolCall(tc ToolCallView, width int) []string {
 		}
 	}
 
+	bodyText := tc.Result
+	if bodyText == "" {
+		bodyText = tc.Preview
+	}
+
 	// Finished tool call with no body: just the labelled top edge
 	// directly closed by the bottom. Avoids a blank interior row
 	// for no-output tools.
-	if tc.Result == "" {
+	if bodyText == "" {
 		if v.FlatTools || v.CompactMode {
 			if v.CompactMode {
 				lines = append(lines, compactToolBlank(v.Theme, width))
@@ -900,7 +906,7 @@ func (v *View) renderToolCall(tc ToolCallView, width int) []string {
 			lines = append(lines, compactToolBlank(v.Theme, width))
 		}
 		lines = append(lines, toolHeaderLine(v.Theme, label, width, v.CompactMode))
-		body := toolResultBlock(v.Theme, tc.Result, flatToolBodyRenderWidth(width), color)
+		body := toolResultBlock(v.Theme, bodyText, flatToolBodyRenderWidth(width), color)
 		for _, l := range v.collapseToolBody(body, false) {
 			_, stripped := parseImageFootprint(l)
 			lines = append(lines, toolBodyLine(v.Theme, stripped, width, v.CompactMode))
@@ -912,7 +918,7 @@ func (v *View) renderToolCall(tc ToolCallView, width int) []string {
 	}
 	lines = append(lines, toolBoxTop(v.Theme, label, width))
 	lines = append(lines, toolBoxSide(v.Theme, "", width))
-	body := toolResultBlock(v.Theme, tc.Result, toolBoxBodyRenderWidth(width), color)
+	body := toolResultBlock(v.Theme, bodyText, toolBoxBodyRenderWidth(width), color)
 	for _, l := range v.collapseToolBody(body, false) {
 		imgCells, stripped := parseImageFootprint(l)
 		if hasImageEscapeLine(stripped) {

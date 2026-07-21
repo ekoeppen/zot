@@ -26,6 +26,33 @@ func (r *recordingConfirmer) Confirm(toolName, preview string) ConfirmDecision {
 	return d
 }
 
+type detailedConfirmer struct {
+	recordingConfirmer
+	call ToolCallConfirmation
+}
+
+func (d *detailedConfirmer) ConfirmToolCall(call ToolCallConfirmation) ConfirmDecision {
+	d.call = call
+	return ConfirmDecision{Allow: true}
+}
+
+func TestConfirmGatePassesRichToolCallPreview(t *testing.T) {
+	confirmer := &detailedConfirmer{}
+	gate := NewConfirmGate(confirmer)
+	call := ToolCallConfirmation{
+		ID:      "call-1",
+		Name:    "edit",
+		Summary: "sample.go",
+		Content: "-old\n+new\n",
+	}
+	if allow, _, _ := gate.CheckToolCall(call); !allow {
+		t.Fatal("rich confirmation should allow")
+	}
+	if confirmer.call != call {
+		t.Fatalf("confirmation = %+v, want %+v", confirmer.call, call)
+	}
+}
+
 func TestConfirmGateNilAllowsEverything(t *testing.T) {
 	var g *ConfirmGate
 	allow, reason, args := g.Check("bash", "rm -rf /")

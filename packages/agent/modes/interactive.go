@@ -5405,6 +5405,7 @@ func (i *Interactive) handleEvent(ev core.AgentEvent) {
 		if tc, ok := i.toolCalls[e.ID]; ok {
 			tc.Done = true
 			tc.Error = e.Result.IsError
+			tc.Preview = ""
 			var text strings.Builder
 			for _, c := range e.Result.Content {
 				if tb, ok := c.(provider.TextBlock); ok {
@@ -5506,10 +5507,24 @@ func (i *Interactive) runReloadExt(ctx context.Context) {
 // pending request is refused via CancelAll so the agent doesn't
 // deadlock.
 func (i *Interactive) Confirm(toolName string, preview string) core.ConfirmDecision {
+	return i.ConfirmToolCall(core.ToolCallConfirmation{Name: toolName, Summary: preview})
+}
+
+// ConfirmToolCall attaches a side-effect-free preview to the matching live
+// tool panel, then blocks until the user approves or refuses the call.
+func (i *Interactive) ConfirmToolCall(call core.ToolCallConfirmation) core.ConfirmDecision {
 	resp := make(chan core.ConfirmDecision, 1)
+	if call.ID != "" {
+		i.mu.Lock()
+		if tc, ok := i.toolCalls[call.ID]; ok {
+			tc.Args = call.Summary
+			tc.Preview = call.Content
+		}
+		i.mu.Unlock()
+	}
 	i.confirmDialog.Enqueue(&confirmRequest{
-		toolName: toolName,
-		preview:  preview,
+		toolName: call.Name,
+		preview:  call.Summary,
 		resp:     resp,
 	})
 	i.invalidate()

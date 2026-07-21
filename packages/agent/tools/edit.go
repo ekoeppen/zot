@@ -36,25 +36,53 @@ func (t *EditTool) Description() string {
 }
 func (t *EditTool) Schema() json.RawMessage { return json.RawMessage(editSchema) }
 
+type editPlan struct {
+	path   string
+	final  []byte
+	result core.ToolResult
+}
+
+// Preview validates the edit against the current file and returns the exact
+// diff without writing anything. The confirmation UI shows this result before
+// the user decides whether Execute may apply it.
+func (t *EditTool) Preview(ctx context.Context, raw json.RawMessage) (core.ToolResult, error) {
+	plan, err := t.plan(raw)
+	if err != nil {
+		return core.ToolResult{}, err
+	}
+	return plan.result, nil
+}
+
 func (t *EditTool) Execute(ctx context.Context, raw json.RawMessage, progress func(string)) (core.ToolResult, error) {
+	plan, err := t.plan(raw)
+	if err != nil {
+		return core.ToolResult{}, err
+	}
+	if err := os.WriteFile(plan.path, plan.final, 0o644); err != nil {
+		return core.ToolResult{}, err
+	}
+	return plan.result, nil
+}
+
+func (t *EditTool) plan(raw json.RawMessage) (editPlan, error) {
 	var a editArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return core.ToolResult{}, fmt.Errorf("invalid args: %w", err)
+		return editPlan{}, fmt.Errorf("invalid args: %w", err)
 	}
 	if a.Path == "" {
-		return core.ToolResult{}, fmt.Errorf("path is required")
+		return editPlan{}, fmt.Errorf("path is required")
 	}
 	if len(a.Edits) == 0 {
-		return core.ToolResult{}, fmt.Errorf("at least one edit is required")
+		return editPlan{}, fmt.Errorf("at least one edit is required")
 	}
 	path := resolvePath(t.CWD, a.Path)
 	if err := t.Sandbox.CheckWritePath(path); err != nil {
-		return core.ToolResult{}, err
+		return editPlan{}, err
 	}
 
 	orig, err := os.ReadFile(path)
 	if err != nil {
-		return core.ToolResult{}, err
+		return editPlan{}, err
 	}
 
 	// Detect BOM and line endings.
@@ -70,17 +98,17 @@ func (t *EditTool) Execute(ctx context.Context, raw json.RawMessage, progress fu
 	// Validate all edits first (against original content, not sequentially).
 	for i, e := range a.Edits {
 		if e.OldText == "" {
-			return core.ToolResult{}, fmt.Errorf("edit %d: oldText must not be empty", i+1)
+			return editPlan{}, fmt.Errorf("edit %d: oldText must not be empty", i+1)
 		}
 		if e.OldText == e.NewText {
-			return core.ToolResult{}, fmt.Errorf("edit %d: oldText equals newText", i+1)
+			return editPlan{}, fmt.Errorf("edit %d: oldText equals newText", i+1)
 		}
 		count := strings.Count(body, e.OldText)
 		if count == 0 {
-			return core.ToolResult{}, fmt.Errorf("edit %d: oldText not found in %s; inspect that file again and use a verbatim excerpt with matching spaces and line breaks", i+1, a.Path)
+			return editPlan{}, fmt.Errorf("edit %d: oldText not found in %s; inspect that file again and use a verbatim excerpt with matching spaces and line breaks", i+1, a.Path)
 		}
 		if count > 1 {
-			return core.ToolResult{}, fmt.Errorf("edit %d: oldText matches %d times (must be unique) in %s", i+1, count, a.Path)
+			return editPlan{}, fmt.Errorf("edit %d: oldText matches %d times (must be unique) in %s", i+1, count, a.Path)
 		}
 	}
 
@@ -98,7 +126,7 @@ func (t *EditTool) Execute(ctx context.Context, raw json.RawMessage, progress fu
 	for i := 0; i < len(spans); i++ {
 		for j := i + 1; j < len(spans); j++ {
 			if spans[i].start < spans[j].end && spans[j].start < spans[i].end {
-				return core.ToolResult{}, fmt.Errorf("edits overlap; merge them into one edit")
+				return editPlan{}, fmt.Errorf("edits overlap; merge them into one edit")
 			}
 		}
 	}
@@ -125,20 +153,15 @@ func (t *EditTool) Execute(ctx context.Context, raw json.RawMessage, progress fu
 	final := append([]byte{}, bom...)
 	final = append(final, []byte(newBody)...)
 
-	if err := os.WriteFile(path, final, 0o644); err != nil {
-		return core.ToolResult{}, err
-	}
-
 	diff := unifiedDiff(a.Path, string(orig), strings.ReplaceAll(newBody, "\r\n", "\n"))
 	// The tool-call header renders the path above the result, so the
-	// result body is just the context diff — no "applied N edit(s)"
-	// prose prefix. The Details map carries the edit count for
-	// programmatic consumers (json mode, rpc clients) that might
-	// want it.
-	return core.ToolResult{
+	// result body is just the context diff. Details carries metadata for
+	// programmatic consumers and confirmation previews.
+	result := core.ToolResult{
 		Content: []provider.Content{provider.TextBlock{Text: diff}},
 		Details: map[string]any{"path": path, "edits": len(a.Edits), "diff": diff},
-	}, nil
+	}
+	return editPlan{path: path, final: final, result: result}, nil
 }
 
 func detectLineEnding(b []byte) string {

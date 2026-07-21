@@ -499,17 +499,44 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 			return a
 		}
 		a.BeforeToolExecute = func(call provider.ToolCallBlock) (bool, string, json.RawMessage) {
-			// Confirm gate runs FIRST: if the user refused, we don't
-			// waste extension-intercept time or let guards see the call.
-			if confirmGate != nil {
-				ok, reason, _ := confirmGate.Check(call.Name, core.BuildPreview(call.Arguments, 120))
-				if !ok {
-					return false, reason, nil
-				}
-			}
+			// Guards run before confirmation because they may rewrite the
+			// arguments. The user must approve the effective call that will
+			// actually execute, not the model's original arguments.
 			r := extMgr.InterceptToolCall(ctx, call.ID, call.Name, call.Arguments)
 			if r.Block {
 				return false, r.Reason, nil
+			}
+			effectiveArgs := call.Arguments
+			if len(r.ModifiedArgs) > 0 && json.Valid(r.ModifiedArgs) {
+				effectiveArgs = r.ModifiedArgs
+			}
+			if confirmGate != nil {
+				var content strings.Builder
+				if tool, err := a.Tools.Get(call.Name); err == nil {
+					if previewer, ok := tool.(core.ToolPreviewer); ok {
+						preview, err := previewer.Preview(ctx, effectiveArgs)
+						if err != nil {
+							return false, err.Error(), nil
+						}
+						for _, block := range preview.Content {
+							if text, ok := block.(provider.TextBlock); ok {
+								if content.Len() > 0 {
+									content.WriteString("\n")
+								}
+								content.WriteString(text.Text)
+							}
+						}
+					}
+				}
+				ok, reason, _ := confirmGate.CheckToolCall(core.ToolCallConfirmation{
+					ID:      call.ID,
+					Name:    call.Name,
+					Summary: core.BuildPreview(effectiveArgs, 120),
+					Content: content.String(),
+				})
+				if !ok {
+					return false, reason, nil
+				}
 			}
 			return true, "", r.ModifiedArgs
 		}
