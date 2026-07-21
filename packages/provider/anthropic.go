@@ -312,7 +312,7 @@ func (c *anthropicClient) buildRequest(req Request) (*anthRequest, error) {
 		}
 	}
 
-	for _, t := range req.Tools {
+	for _, t := range activeToolDefinitions(req.Tools, req.Messages) {
 		name := t.Name
 		if c.oauthTok != "" {
 			name = toClaudeCodeToolName(name)

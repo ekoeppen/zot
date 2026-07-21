@@ -270,15 +270,10 @@ func (c *openaiClient) buildRequest(req Request) (*oaiRequest, error) {
 
 	deferredMode := isKimiDeferredModel(req.Model)
 	toolByName := make(map[string]Tool, len(req.Tools))
-	activatedTools := make(map[string]bool)
 	for _, t := range req.Tools {
 		toolByName[t.Name] = t
 	}
-	for _, msg := range req.Messages {
-		for _, name := range msg.AddedToolNames {
-			activatedTools[name] = true
-		}
-	}
+	activatedTools := activatedToolNames(req.Messages)
 
 	// DeepSeek's chat-completions API rejects the multimodal content
 	// schema (parts arrays containing image_url). Force every user/tool
