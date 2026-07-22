@@ -97,7 +97,7 @@ func (s *Sandbox) DisplayPath(abs, given string) string {
 // CheckCommand applies a lightweight sanity check to a bash command
 // when jailed. We cannot fully sandbox a shell, but we can reject the
 // most obvious escapes so the model does not accidentally touch files
-// outside root via absolute paths.
+// outside root via shell arguments or redirections.
 func (s *Sandbox) CheckCommand(cmd string) error {
 	if !s.Locked() {
 		return nil
@@ -135,6 +135,9 @@ func (s *Sandbox) CheckCommand(cmd string) error {
 			return err
 		}
 	}
+	if err := s.checkCommandPaths(cmd); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -158,6 +161,113 @@ func cdTarget(seg string) (string, bool) {
 		}
 	}
 	return arg, true
+}
+
+func (s *Sandbox) checkCommandPaths(cmd string) error {
+	for _, tok := range shellWords(cmd) {
+		for _, p := range candidatePaths(tok) {
+			if err := s.checkCommandPath(p); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func shellWords(cmd string) []string {
+	var words []string
+	var b strings.Builder
+	var quote rune
+	escaped := false
+	flush := func() {
+		if b.Len() == 0 {
+			return
+		}
+		words = append(words, b.String())
+		b.Reset()
+	}
+	for _, r := range cmd {
+		if escaped {
+			b.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' && quote != '\'' {
+			b.WriteRune(r)
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+				continue
+			}
+			b.WriteRune(r)
+			continue
+		}
+		switch r {
+		case '\'', '"':
+			quote = r
+		case ' ', '\t', '\n', '\r', ';', '&', '|', '(', ')', '<', '>':
+			flush()
+		default:
+			b.WriteRune(r)
+		}
+	}
+	flush()
+	return words
+}
+
+func candidatePaths(tok string) []string {
+	if tok == "" || strings.Contains(tok, "://") {
+		return nil
+	}
+	if strings.HasPrefix(tok, "-") {
+		if _, value, ok := strings.Cut(tok, "="); ok {
+			return candidatePaths(value)
+		}
+		return nil
+	}
+	if name, value, ok := strings.Cut(tok, "="); ok && name != "" && value != "" {
+		return candidatePaths(value)
+	}
+	if looksLikePath(tok) {
+		return []string{tok}
+	}
+	return nil
+}
+
+func looksLikePath(s string) bool {
+	return filepath.IsAbs(s) ||
+		strings.HasPrefix(s, "/") ||
+		strings.HasPrefix(s, "~") ||
+		strings.HasPrefix(s, "$HOME") ||
+		strings.HasPrefix(s, "${HOME}") ||
+		strings.HasPrefix(s, "..") ||
+		strings.Contains(s, "/") ||
+		strings.Contains(s, `\\`)
+}
+
+func (s *Sandbox) checkCommandPath(path string) error {
+	rootAbs, err := canonical(s.Root)
+	if err != nil {
+		return fmt.Errorf("sandbox root: %w", err)
+	}
+	expanded := expandHome(path)
+	if strings.HasPrefix(expanded, "/") && !filepath.IsAbs(expanded) {
+		return fmt.Errorf("jailed: path %q is outside sandbox root %q (use /unjail to disable)", path, s.Root)
+	}
+	if !filepath.IsAbs(expanded) {
+		expanded = filepath.Join(s.Root, filepath.FromSlash(expanded))
+	}
+	target, err := canonicalOrParent(expanded)
+	if err != nil {
+		return fmt.Errorf("sandbox path: %w", err)
+	}
+	if !isUnder(rootAbs, target) {
+		return fmt.Errorf("jailed: path %q is outside sandbox root %q (use /unjail to disable)", path, s.Root)
+	}
+	return nil
 }
 
 // checkCDTarget resolves a `cd` destination (relative to the sandbox
@@ -200,12 +310,14 @@ func expandHome(p string) string {
 		return p
 	}
 	switch {
-	case p == "~" || p == "$HOME":
+	case p == "~" || p == "$HOME" || p == "${HOME}":
 		return home
 	case strings.HasPrefix(p, "~/"):
 		return filepath.Join(home, p[2:])
 	case strings.HasPrefix(p, "$HOME/"):
 		return filepath.Join(home, p[len("$HOME/"):])
+	case strings.HasPrefix(p, "${HOME}/"):
+		return filepath.Join(home, p[len("${HOME}/"):])
 	default:
 		return p
 	}

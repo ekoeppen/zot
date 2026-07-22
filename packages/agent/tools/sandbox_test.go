@@ -56,6 +56,25 @@ func TestSandboxCommandBanned(t *testing.T) {
 	}
 }
 
+// TestBashToolRejectsOutsidePathWhenLocked is a regression for issue #94.
+func TestBashToolRejectsOutsidePathWhenLocked(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sb := NewSandbox(root)
+	sb.Lock()
+	tool := &BashTool{CWD: root, Sandbox: sb}
+
+	_, err := tool.Execute(context.Background(), mustJSONRaw(t, map[string]any{"command": "cat " + outsideFile}), nil)
+	if err == nil {
+		t.Fatal("expected jailed bash to reject outside path")
+	}
+}
+
 // TestSandboxAllowsCDIntoSubdir is the regression for issue #39: a `cd`
 // into a subdirectory of the sandbox root, spelled as an absolute path,
 // must be allowed. The old guard rejected any `cd /...` outright, which
@@ -69,12 +88,17 @@ func TestSandboxAllowsCDIntoSubdir(t *testing.T) {
 	sb := NewSandbox(root)
 	sb.Lock()
 
+	insideFile := filepath.Join(root, "inside file.txt")
+	if err := os.WriteFile(insideFile, []byte("inside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	allowed := []string{
 		"cd " + sub + " && go build ./...",
 		"cd " + root + " && go build ./...",
 		"cd " + root, // bare cd to root
 		"cd packages/provider && go build",
 		"cd \"" + sub + "\" && ls", // quoted absolute path
+		"cat \"" + insideFile + "\"",
 	}
 	for _, c := range allowed {
 		if err := sb.CheckCommand(c); err != nil {
@@ -82,11 +106,20 @@ func TestSandboxAllowsCDIntoSubdir(t *testing.T) {
 		}
 	}
 
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	blocked := []string{
 		"cd /etc",
 		"cd / && ls",
 		"cd ..",                    // parent of root escapes
 		"cd " + filepath.Dir(root), // explicit parent
+		"cat " + outsideFile,
+		"cat <" + outsideFile,
+		"grep secret ../secret.txt",
+		"cat ${HOME}/.ssh/config",
 	}
 	for _, c := range blocked {
 		if err := sb.CheckCommand(c); err == nil {
