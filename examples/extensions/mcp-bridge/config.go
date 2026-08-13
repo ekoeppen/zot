@@ -35,6 +35,19 @@ type ServerConfig struct {
 	ConnectTimeout int `json:"connectTimeout,omitempty"` // connection timeout (default: 30)
 	RequestTimeout int `json:"requestTimeout,omitempty"` // per-request timeout (default: 60)
 	IdleTimeout    int `json:"idleTimeout,omitempty"`    // idle timeout before stopping (default: 300)
+
+	// OAuth flow configuration
+	OAuth *OAuthConfig `json:"oauth,omitempty"`
+}
+
+// OAuthConfig defines how to perform an OAuth2 flow for this server.
+type OAuthConfig struct {
+	ClientID     string `json:"clientId"`
+	ClientSecret string `json:"clientSecret"`
+	AuthURL      string `json:"authUrl"`
+	TokenURL     string `json:"tokenUrl"`
+	RedirectPort int    `json:"redirectPort,omitempty"` // default: random
+	Scope        string `json:"scope,omitempty"`
 }
 
 // Config is the top-level MCP configuration.

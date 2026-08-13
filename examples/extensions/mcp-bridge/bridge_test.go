@@ -32,7 +32,8 @@ func TestHandleToolCallStartFailureIsFriendlyError(t *testing.T) {
 	b.servers["bogus"] = newManagedServer("bogus",
 		ServerConfig{Transport: "no-such-transport", ConnectTimeout: 1, RequestTimeout: 1},
 		"/project",
-		log.New(io.Discard, "", 0))
+		log.New(io.Discard, "", 0),
+		nil)
 	b.mapping["mcp__bogus__t"] = toolMapping{serverName: "bogus", mcpTool: "t"}
 
 	res := b.handleToolCall("mcp__bogus__t", nil)

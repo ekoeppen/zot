@@ -280,6 +280,7 @@ it explicitly with the `?tools=` URL parameter or the `X-Allowed-Tools` header.
 | Command | Description |
 |---|---|
 | `/mcp` | Show status of all configured servers |
+| `/mcp login <name>` | Perform OAuth login for a server |
 | `/mcp help` | Show available MCP commands |
 | `/mcp <name>` | Show detailed status for one server |
 | `/mcp start <name>` | Manually start a server |
@@ -342,9 +343,30 @@ zot ext logs mcp -f
 
 ## Limitations
 
-- **No OAuth flow** — authentication requires manual token configuration in headers
 - **No resources/prompts** — only tools are bridged (MCP resources and prompts coming later)
 - **No automatic config hot reload** — run `/reload-ext` after setup/config changes
+
+## OAuth Flow
+
+To use a remote MCP server with OAuth:
+
+1. Add the `oauth` configuration to your `mcp.json`:
+   ```json
+   "antigravity": {
+     "transport": "streamable-http",
+     "url": "https://mcp.example.com/mcp",
+     "oauth": {
+       "clientId": "YOUR_CLIENT_ID",
+       "clientSecret": "YOUR_CLIENT_SECRET",
+       "authUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+       "tokenUrl": "https://oauth2.googleapis.com/token",
+       "scope": "https://www.googleapis.com/auth/userinfo.email"
+     }
+   }
+   ```
+2. In your Google Cloud Console (or other provider), set the **Authorized Redirect URI** to `http://127.0.0.1:0/callback` (or a specific port if you configure `redirectPort`).
+3. Run `/mcp login antigravity` in zot. It will open your browser to complete the login.
+4. The token is saved to `$ZOT_HOME/mcp-auth.json` and will be used (and refreshed if possible) automatically.
 
 ## Development
 
