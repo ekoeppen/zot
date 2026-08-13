@@ -167,6 +167,9 @@ func registerCommands(e *ext.Extension, b *bridge) {
 		case "restart":
 			return handleRestartCommand(e, b)
 
+		case "login":
+			return handleLoginCommand(e, b, parts[1:])
+
 		case "refresh", "discover":
 			return handleRefreshCommand(e, b, toolCachePath())
 
@@ -204,6 +207,7 @@ func mcpOverview(b *bridge) string {
 	sb.WriteString("  /mcp start <server|all>               Start one server, or all servers\n")
 	sb.WriteString("  /mcp stop <server|all>                Stop one server, or all servers\n")
 	sb.WriteString("  /mcp restart                          Restart all servers\n")
+	sb.WriteString("  /mcp login <server>                   Perform OAuth login for a server\n")
 	sb.WriteString("  /mcp refresh                          Refresh cached tool definitions\n")
 	sb.WriteString("  /mcp help                             Show all MCP commands\n")
 	return strings.TrimRight(sb.String(), "\n")
@@ -298,6 +302,44 @@ func handleRefreshCommand(e *ext.Extension, b *bridge, cachePath string) ext.Res
 			return
 		}
 		notifyBridgeStatus(e, b)
+	}()
+	return ext.Noop()
+}
+
+func handleLoginCommand(e *ext.Extension, b *bridge, args []string) ext.Response {
+	if len(args) != 1 {
+		return ext.Errorf("usage: /mcp login <server-name>")
+	}
+	if b == nil {
+		return ext.Errorf("no servers configured")
+	}
+	name := args[0]
+	srv, ok := b.servers[name]
+	if !ok {
+		return ext.Errorf("unknown server: %s", name)
+	}
+	if srv.config.OAuth == nil {
+		return ext.Errorf("server %s is not configured for OAuth", name)
+	}
+
+	notifyText(e, "info", fmt.Sprintf("Starting OAuth login for %s...", name))
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		tok, err := performOAuthFlow(ctx, b.logger, name, *srv.config.OAuth)
+		if err != nil {
+			notifyText(e, "error", fmt.Sprintf("OAuth login for %s failed: %v", name, err))
+			return
+		}
+		if err := b.authStore.save(name, *tok); err != nil {
+			notifyText(e, "error", fmt.Sprintf("Failed to save token for %s: %v", name, err))
+			return
+		}
+		notifyText(e, "success", fmt.Sprintf("OAuth login for %s successful! Restarting server...", name))
+		b.stopServer(name)
+		if err := b.startServer(name); err != nil {
+			notifyText(e, "warn", fmt.Sprintf("Server %s restart failed: %v", name, err))
+		}
 	}()
 	return ext.Noop()
 }

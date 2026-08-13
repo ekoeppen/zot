@@ -59,6 +59,8 @@ type managedServer struct {
 	cwd    string
 	logger *log.Logger
 
+	authStore *MCPAuthStore
+
 	mu       sync.Mutex
 	state    serverState
 	client   *client.Client
@@ -69,14 +71,15 @@ type managedServer struct {
 }
 
 // newManagedServer creates a new server wrapper.
-func newManagedServer(name string, cfg ServerConfig, cwd string, logger *log.Logger) *managedServer {
+func newManagedServer(name string, cfg ServerConfig, cwd string, logger *log.Logger, authStore *MCPAuthStore) *managedServer {
 	return &managedServer{
-		name:     name,
-		config:   cfg,
-		cwd:      cwd,
-		logger:   logger,
-		state:    stateStopped,
-		lastUsed: time.Now(),
+		name:      name,
+		config:    cfg,
+		cwd:       cwd,
+		logger:    logger,
+		authStore: authStore,
+		state:     stateStopped,
+		lastUsed:  time.Now(),
 	}
 }
 
@@ -245,6 +248,45 @@ func (s *managedServer) startStreamableHTTP(ctx context.Context) (*client.Client
 	c, err := client.NewStreamableHttpClient(s.config.URL, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("create HTTP client: %w", err)
+	}
+
+	// If OAuth is configured, try to inject the token
+	if s.config.OAuth != nil && s.authStore != nil {
+		tok, err := s.authStore.get(s.name)
+		if err != nil {
+			s.logger.Printf("[%s] failed to load OAuth token: %v", s.name, err)
+		} else if tok != nil {
+			if tok.Expired() && tok.RefreshToken != "" {
+				s.logger.Printf("[%s] OAuth token expired, attempting refresh", s.name)
+				newTok, err := refreshOAuthToken(ctx, *s.config.OAuth, tok.RefreshToken)
+				if err != nil {
+					s.logger.Printf("[%s] OAuth refresh failed: %v", s.name, err)
+				} else {
+					if newTok.RefreshToken == "" {
+						newTok.RefreshToken = tok.RefreshToken
+					}
+					tok = newTok
+					if err := s.authStore.save(s.name, *tok); err != nil {
+						s.logger.Printf("[%s] failed to save refreshed token: %v", s.name, err)
+					} else {
+						s.logger.Printf("[%s] OAuth token refreshed and saved", s.name)
+					}
+				}
+			}
+			s.logger.Printf("[%s] using stored OAuth token", s.name)
+			// Re-wrap the transport to add the header. mcp-go doesn't have an easy way
+			// to add headers AFTER creation if we didn't do it in opts, but we can
+			// try to cast or just ensure opts was built with it.
+			// Let's rebuild opts and client if we have a token.
+			headers["Authorization"] = "Bearer " + tok.AccessToken
+			opts = []transport.StreamableHTTPCOption{transport.WithHTTPHeaders(headers)}
+			c, err = client.NewStreamableHttpClient(s.config.URL, opts...)
+			if err != nil {
+				return nil, fmt.Errorf("create HTTP client with OAuth: %w", err)
+			}
+		} else {
+			s.logger.Printf("[%s] OAuth configured but no token stored; run /mcp login %s", s.name, s.name)
+		}
 	}
 
 	// Start the transport

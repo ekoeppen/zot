@@ -67,6 +67,8 @@ type bridge struct {
 	mapping map[string]toolMapping // zot tool name → MCP server + tool; guarded by mu
 	logger  *log.Logger
 
+	authStore *MCPAuthStore
+
 	mu               sync.Mutex // guards mapping and searchRegistered
 	searchRegistered bool
 }
@@ -74,11 +76,12 @@ type bridge struct {
 // newBridge creates a new MCP→zot bridge.
 func newBridge(e *ext.Extension, cwd string, logger *log.Logger) *bridge {
 	return &bridge{
-		e:       e,
-		cwd:     cwd,
-		servers: make(map[string]*managedServer),
-		mapping: make(map[string]toolMapping),
-		logger:  logger,
+		e:         e,
+		cwd:       cwd,
+		servers:   make(map[string]*managedServer),
+		mapping:   make(map[string]toolMapping),
+		logger:    logger,
+		authStore: newMCPAuthStore(),
 	}
 }
 
@@ -106,7 +109,7 @@ func toolName(serverName, mcpToolName string) string {
 // loadServers reads the config and creates managed servers.
 func (b *bridge) loadServers(cfg Config) {
 	for name, srvCfg := range cfg.MCPServers {
-		srv := newManagedServer(name, srvCfg, b.cwd, b.logger)
+		srv := newManagedServer(name, srvCfg, b.cwd, b.logger, b.authStore)
 		b.servers[name] = srv
 	}
 }
