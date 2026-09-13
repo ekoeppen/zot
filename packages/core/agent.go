@@ -62,6 +62,13 @@ type Agent struct {
 	// for ordinary follow-up messages or tool-loop steps.
 	BeforeStart func(context.Context, string) string
 
+	// BeforeModelRequest, if set, is called immediately before sending
+	// messages to the provider for each model request. It returns the
+	// message list to send to the provider. This allows extensions to
+	// dynamically transform (prune, filter, inject) the view of messages
+	// sent to the LLM without mutating the underlying session transcript.
+	BeforeModelRequest func(ctx context.Context, messages []provider.Message) []provider.Message
+
 	// BeforeTurn, if set, is called before each turn's model call.
 	// Returning (allowed=false, reason) aborts the turn; reason is
 	// surfaced as an assistant-like status line. Used for rate-
@@ -727,6 +734,9 @@ func (a *Agent) oneTurn(ctx context.Context, sink func(AgentEvent)) (provider.St
 		}
 		a.mu.Unlock()
 		break
+	}
+	if a.BeforeModelRequest != nil {
+		req.Messages = repairToolUseResultPairs(a.BeforeModelRequest(ctx, req.Messages))
 	}
 	stream, err := a.Client.Stream(ctx, req)
 	if err != nil {

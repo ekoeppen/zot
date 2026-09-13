@@ -73,6 +73,7 @@ type SubscribeFromExt struct {
 
 type EventInterceptResponseFromExt struct {
 	SystemPrompt json.RawMessage `json:"system_prompt,omitempty"`
+	Messages     json.RawMessage `json:"messages,omitempty"`
 	Type         string          `json:"type"`
 	ID           string          `json:"id"`
 	Block        bool            `json:"block,omitempty"`
@@ -282,6 +283,7 @@ type EventFromHost struct {
 
 type EventInterceptFromHost struct {
 	SystemPrompt    *string         `json:"system_prompt,omitempty"`
+	Messages        json.RawMessage `json:"messages,omitempty"`
 	OriginExtension string          `json:"origin_extension,omitempty"`
 	SessionID       string          `json:"session_id,omitempty"`
 	AgentRunID      string          `json:"agent_run_id,omitempty"`

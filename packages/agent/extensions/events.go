@@ -82,6 +82,7 @@ func (m *Manager) emitEventLocked(ev extproto.EventFromHost) {
 // for assistant_message) to carry the rewrite into the action.
 type InterceptResult struct {
 	SystemPrompt json.RawMessage
+	Messages     json.RawMessage
 	failure      string
 	Block        bool
 	Reason       string
@@ -214,7 +215,7 @@ func (m *Manager) askIntercept(ctx context.Context, ext *Extension, payload extp
 		return InterceptResult{}
 	}
 	var writeErr error
-	if payload.Event == "before_agent_start" {
+	if payload.Event == "before_agent_start" || payload.Event == "before_model_request" {
 		// Bound pipe writes too. Closing the pipe releases a blocked writer.
 		done := make(chan error, 1)
 		go func() { _, err := ext.stdin.Write(frame); done <- err }()
@@ -240,6 +241,7 @@ func (m *Manager) askIntercept(ctx context.Context, ext *Extension, payload extp
 	case resp := <-ch:
 		return InterceptResult{
 			SystemPrompt: resp.SystemPrompt,
+			Messages:     resp.Messages,
 			Block:        resp.Block,
 			Reason:       resp.Reason,
 			ModifiedArgs: resp.ModifiedArgs,

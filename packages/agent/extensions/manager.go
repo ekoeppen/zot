@@ -1007,7 +1007,7 @@ func (m *Manager) readLoop(ext *Extension, scanner *bufio.Scanner) {
 				}
 				for _, ev := range sub.Intercept {
 					switch ev {
-					case "tool_call", "turn_start", "assistant_message", "before_agent_start":
+					case "tool_call", "turn_start", "assistant_message", "before_agent_start", "before_model_request":
 						ext.interceptSubs[ev] = struct{}{}
 					}
 				}
