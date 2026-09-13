@@ -379,6 +379,9 @@ Interceptable events:
 
 - `before_agent_start`: inspect and replace the complete system prompt before
   the first model call. See [System prompt replacement](#system-prompt-replacement).
+- `before_model_request`: dynamically transform (prune, filter, inject) the
+  message history sent to the LLM for each model call, without mutating the
+  ground truth session transcript. See [Dynamic message transformation](#dynamic-message-transformation).
 - `tool_call`: block the call (model sees `reason` as the tool
   error) or rewrite args via `modified_args`.
 - `turn_start`: block the turn before the model is called. Useful
@@ -438,6 +441,27 @@ Supported in interactive, print, JSON, and RPC modes. RPC warnings use
 context-file instructions. This feature is not a security boundary and does
 not change tool permissions or validate the safety of replacement instructions.
 
+#### Dynamic message transformation
+
+Subscribe with `{"type":"subscribe","intercept":["before_model_request"]}`.
+Immediately before sending messages to the LLM provider on each model call,
+zot sends an interception frame containing the candidate message history:
+
+```json
+{"type":"event_intercept","id":"req-1","event":"before_model_request","session_id":"session-123","cwd":"/work/repo","provider":"anthropic","model":"claude-opus-4-7","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}
+```
+
+Reply with a transformed message array, or omit `messages` to pass through unmodified:
+
+```json
+{"type":"event_intercept_response","id":"req-1","messages":[{"role":"user","content":[{"type":"text","text":"[filtered] hello"}]}]}
+```
+
+Key guarantees:
+- **Ground Truth Invariant**: The transformed messages are used only for the outgoing provider API request. The host's in-memory transcript, on-disk session file (`.jsonl`), timeline view, and session export remain unmutated ground truth.
+- **Tool Pairing Integrity**: After the extension transforms the messages, zot automatically runs `repairToolUseResultPairs()` on the result, ensuring that provider-mandated tool_use / tool_result pairing is preserved.
+- **Fail-Soft**: Invalid JSON, timeouts, or errors preserve the current message list and log a diagnostic.
+
 #### `event_intercept_response`
 
 Reply to an `event_intercept` from the host. All fields default to
@@ -450,6 +474,7 @@ Reply to an `event_intercept` from the host. All fields default to
 | `modified_args` | for `tool_call`: rewritten JSON args the tool will actually see. Must be a valid JSON object. Ignored when `block` is true. |
 | `replace_text` | for `assistant_message`: replaces the user-visible text. The model's original output still lives in the transcript. Ignored when `block` is true. |
 | `system_prompt` | for `before_agent_start`: exact string replacement, including an empty string. Omission keeps the current prompt. |
+| `messages` | for `before_model_request`: replacement array of messages for the LLM request. Omission keeps the current messages. |
 
 Missing the response within 5s is treated as "allow, unchanged". For
 `before_agent_start`, this deadline also includes the request write; legacy
@@ -1109,7 +1134,7 @@ host metadata such as `HostInfo.CWD`, `Provider`, `Model`, `ZotVersion`,
 `ExtensionDir`, or `DataDir`. The SDK sends `hello`, waits for
 `hello_ack`, runs `OnHello`, announces registrations, then sends `ready`.
 
-The SDK has five interceptor hooks, all optional:
+The SDK has six interceptor hooks, all optional:
 
 ```go
 // e is the *ext.Extension returned by ext.New(...).
@@ -1119,6 +1144,13 @@ The SDK has five interceptor hooks, all optional:
 e.InterceptBeforeAgentStart(func(event ext.BeforeAgentStartEvent) *string {
     prompt := event.SystemPrompt + "\nUse the project's preferred coding style."
     return &prompt
+})
+
+// Dynamically transform messages sent to the LLM without mutating transcript.
+// Return nil to leave messages unmodified.
+e.InterceptBeforeModelRequest(func(event ext.BeforeModelRequestEvent) []provider.Message {
+    // For example, filter or prune older tool outputs before sending to model:
+    return event.Messages
 })
 
 // Refuse calls or rewrite args before they run.

@@ -439,6 +439,7 @@ func wireNonInteractiveAgentExtLifecycle(ctx context.Context, ag *core.Agent, ex
 		return
 	}
 	wireBeforeAgentStart(ag, extMgr, "")
+	wireBeforeModelRequest(ag, extMgr, "")
 	ag.BeforeToolExecuteContext = func(ctx context.Context, call provider.ToolCallBlock) (bool, string, json.RawMessage) {
 		res := extMgr.InterceptToolCall(ctx, call.ID, call.Name, call.Arguments)
 		if res.Block {
@@ -934,6 +935,7 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 	wireAgentExt := func(resolved Resolved) *core.Agent {
 		a := resolved.NewAgent()
 		wireBeforeAgentStart(a, extMgr, resolved.Provider)
+		wireBeforeModelRequest(a, extMgr, resolved.Provider)
 		a.BeforeToolExecuteContext = func(ctx context.Context, call provider.ToolCallBlock) (bool, string, json.RawMessage) {
 			// Guards run before confirmation because they may rewrite the
 			// arguments. The user must approve the effective call that will
