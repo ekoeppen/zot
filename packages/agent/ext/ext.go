@@ -41,6 +41,7 @@ import (
 	"sync"
 
 	"github.com/patriceckhart/zot/packages/agent/extproto"
+	"github.com/patriceckhart/zot/packages/provider"
 )
 
 func base64Encode(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
@@ -163,6 +164,20 @@ type BeforeAgentStartEvent struct {
 // BeforeAgentStartHandler returns an exact replacement, or nil to keep the prompt.
 // A pointer to an empty string intentionally removes the system prompt.
 type BeforeAgentStartHandler func(BeforeAgentStartEvent) *string
+
+// BeforeModelRequestEvent contains candidate messages and effective runtime context.
+type BeforeModelRequestEvent struct {
+	Messages   []provider.Message
+	SessionID  string
+	AgentRunID string
+	CWD        string
+	Provider   string
+	Model      string
+}
+
+// BeforeModelRequestHandler returns a replacement slice of messages for the LLM request,
+// or nil to keep the messages unmodified.
+type BeforeModelRequestHandler func(BeforeModelRequestEvent) []provider.Message
 
 // TurnStartDecision controls whether the next model call runs. Zero
 // value means "allow".
@@ -309,6 +324,7 @@ type Extension struct {
 	interceptToolRich  ToolCallHandler
 	interceptOn        bool
 	interceptStart     BeforeAgentStartHandler
+	interceptModelReq  BeforeModelRequestHandler
 	interceptTurn      TurnStartHandler
 	interceptAssistant AssistantMessageHandler
 	panelKeys          map[string]func(key, text string)
@@ -506,6 +522,15 @@ func (e *Extension) InterceptBeforeAgentStart(fn BeforeAgentStartHandler) {
 	e.mu.Unlock()
 }
 
+// InterceptBeforeModelRequest registers a dynamic message transformation hook
+// that runs immediately before each model request. Return a replacement slice
+// of messages, or nil to keep the messages unmodified.
+func (e *Extension) InterceptBeforeModelRequest(fn BeforeModelRequestHandler) {
+	e.mu.Lock()
+	e.interceptModelReq = fn
+	e.mu.Unlock()
+}
+
 // InterceptTurnStart registers a guard that runs before every turn's
 // model call. Return Block=true with Reason to abort the turn.
 // Useful for deny-by-default gates and usage quotas.
@@ -586,6 +611,7 @@ func (e *Extension) Run() error {
 	toolDefs := append([]toolDef(nil), e.toolDefs...)
 	eventNames := append([]string(nil), e.eventNames...)
 	interceptStart := e.interceptStart != nil
+	interceptModelReq := e.interceptModelReq != nil
 	interceptTool := e.interceptOn
 	interceptTurn := e.interceptTurn != nil
 	interceptAsst := e.interceptAssistant != nil
@@ -609,6 +635,9 @@ func (e *Extension) Run() error {
 	var intercepts []string
 	if interceptStart {
 		intercepts = append(intercepts, "before_agent_start")
+	}
+	if interceptModelReq {
+		intercepts = append(intercepts, "before_model_request")
 	}
 	if interceptTool {
 		intercepts = append(intercepts, "tool_call")
@@ -837,6 +866,23 @@ func (e *Extension) dispatchIntercept(ei extproto.EventInterceptFromHost) {
 				CWD: ei.CWD, Provider: ei.Provider, Model: ei.Model,
 			}); replacement != nil {
 				resp.SystemPrompt, _ = json.Marshal(*replacement)
+			}
+		}
+	case "before_model_request":
+		e.mu.Lock()
+		fn := e.interceptModelReq
+		e.mu.Unlock()
+		if fn != nil {
+			msgs, _ := provider.UnmarshalMessages(ei.Messages)
+			if replacement := fn(BeforeModelRequestEvent{
+				Messages:   msgs,
+				SessionID:  ei.SessionID,
+				AgentRunID: ei.AgentRunID,
+				CWD:        ei.CWD,
+				Provider:   ei.Provider,
+				Model:      ei.Model,
+			}); replacement != nil {
+				resp.Messages, _ = json.Marshal(replacement)
 			}
 		}
 	case "tool_call":

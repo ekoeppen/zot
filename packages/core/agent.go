@@ -57,6 +57,13 @@ type Agent struct {
 	// for ordinary follow-up messages or tool-loop steps.
 	BeforeStart func(context.Context, string) string
 
+	// BeforeModelRequest, if set, is called immediately before sending
+	// messages to the provider for each model request. It returns the
+	// message list to send to the provider. This allows extensions to
+	// dynamically transform (prune, filter, inject) the view of messages
+	// sent to the LLM without mutating the underlying session transcript.
+	BeforeModelRequest func(ctx context.Context, messages []provider.Message) []provider.Message
+
 	// BeforeTurn, if set, is called before each turn's model call.
 	// Returning (allowed=false, reason) aborts the turn; reason is
 	// surfaced as an assistant-like status line. Used for rate-
@@ -608,9 +615,25 @@ func (a *Agent) oneTurn(ctx context.Context, sink func(AgentEvent)) (provider.St
 			a.mu.Unlock()
 			continue
 		}
+		rawMessages := append([]provider.Message(nil), a.messages...)
+		model := a.Model
+		system := a.System
+		tools := a.Tools.Specs()
+		reasoning := a.Reasoning
+		maxTokens := a.MaxTokens
+		temperature := a.Temperature
+		sessionID := a.SessionID
+		maxToolCalls := a.MaxToolCalls
+		a.mu.Unlock()
+
+		messages := rawMessages
+		if a.BeforeModelRequest != nil {
+			messages = a.BeforeModelRequest(ctx, messages)
+		}
+
 		req = provider.Request{
-			Model:  a.Model,
-			System: a.System,
+			Model:  model,
+			System: system,
 			// Repair any dangling tool_use blocks before sending. A turn
 			// aborted mid-flight (cancel, connection drop, ECONNREFUSED to a
 			// dev server, etc.) can leave an assistant tool_use with no
@@ -619,15 +642,14 @@ func (a *Agent) oneTurn(ctx context.Context, sink func(AgentEvent)) (provider.St
 			// next in-process request is rejected by providers like Anthropic
 			// with "tool_use ids were found without tool_result blocks". The
 			// repair is pure and a no-op on already-valid transcripts.
-			Messages:     repairToolUseResultPairs(append([]provider.Message(nil), a.messages...)),
-			Tools:        a.Tools.Specs(),
-			Reasoning:    a.Reasoning,
-			MaxTokens:    a.MaxTokens,
-			Temperature:  a.Temperature,
-			SessionID:    a.SessionID,
-			MaxToolCalls: a.MaxToolCalls,
+			Messages:     repairToolUseResultPairs(messages),
+			Tools:        tools,
+			Reasoning:    reasoning,
+			MaxTokens:    maxTokens,
+			Temperature:  temperature,
+			SessionID:    sessionID,
+			MaxToolCalls: maxToolCalls,
 		}
-		a.mu.Unlock()
 		break
 	}
 	stream, err := a.Client.Stream(ctx, req)
