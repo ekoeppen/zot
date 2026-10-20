@@ -1246,6 +1246,8 @@ Slash commands also work while the agent is busy. Non-destructive ones (`/help`,
 | `ctrl+1` ... `ctrl+9` | Switch to the model bound to that quick-model slot (configured in `/settings` -> model shortcuts). No-op while a turn is running. |
 | `@` | Open the file picker. Browse files and directories in the working directory. |
 
+In the interactive TUI, code-running tools with `code`, `query`, `expression`, or `script` arguments show syntax-highlighted input while streaming and after completion. This applies to recognized tool names (such as `eval_lg`, Python, and SQL tools) or tools that provide a `lang`/`language` argument. Completed results appear before code so long scripts do not hide output in shortened previews; fully collapsed calls keep the result preview. This is display-only and does not change tool results sent to the model.
+
 On Linux, image paste tries Wayland before X11 when both display variables are set. If all available image clipboard backends fail, the error includes each backend's diagnostic. Successful fallback does not display a warning.
 
 ### File picker (`@`)
