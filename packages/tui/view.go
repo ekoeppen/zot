@@ -122,10 +122,11 @@ type View struct {
 	// the box top edge without having to look back at the assistant
 	// message that originated the call. Rebuilt on each Build().
 	toolCallLabels  map[string]string
-	toolSources     map[string]string // codemode source by call ID, rebuilt on Build
-	ShowReasoning   bool              // show saved readable reasoning before assistant replies
-	Reasoning       string            // bounded live reasoning tail
-	Streaming       string            // current assistant text delta
+	toolSources     map[string]string        // codemode source by call ID, rebuilt on Build
+	toolCodes       map[string]toolCodeInput // non-codemode code by call ID
+	ShowReasoning   bool                     // show saved readable reasoning before assistant replies
+	Reasoning       string                   // bounded live reasoning tail
+	Streaming       string                   // current assistant text delta
 	StreamingActive bool
 	ToolCalls       []ToolCallView // tool calls in flight or completed
 
@@ -530,6 +531,7 @@ func (v *View) refreshToolPaths() {
 	v.toolStartLines = map[string]int{}
 	v.toolCallLabels = map[string]string{}
 	v.toolSources = map[string]string{}
+	v.toolCodes = map[string]toolCodeInput{}
 	for _, m := range v.Messages {
 		for _, c := range m.Content {
 			if tc, ok := c.(provider.ToolCallBlock); ok {
@@ -541,6 +543,9 @@ func (v *View) refreshToolPaths() {
 				}
 				v.toolCallLabels[tc.ID] = tc.Name + " " + ShortArgs(tc.Name, tc.Arguments)
 				v.toolSources[tc.ID] = codemodeSource(tc.Name, string(tc.Arguments))
+				if code, ok := codeFromToolArgs(tc.Name, tc.Arguments); ok {
+					v.toolCodes[tc.ID] = code
+				}
 			}
 		}
 		for _, calls := range m.NestedToolCalls() {
@@ -549,6 +554,9 @@ func (v *View) refreshToolPaths() {
 				v.toolStartLines[call.ID] = offsetFromToolArgs(call.Args)
 				v.toolCallLabels[call.ID] = call.Name + " " + ShortArgs(call.Name, call.Args)
 				v.toolSources[call.ID] = codemodeSource(call.Name, string(call.Args))
+				if code, ok := codeFromToolArgs(call.Name, call.Args); ok {
+					v.toolCodes[call.ID] = code
+				}
 			}
 		}
 	}
@@ -572,6 +580,8 @@ func (v *View) renderMessageCached(m provider.Message, width int, turnOpen bool)
 			key.hash = fnv64aWrite(key.hash, []byte(v.toolSources[result.CallID]))
 			key.hash = fnv64aWriteByte(key.hash, 0)
 			key.hash = fnv64aWrite(key.hash, []byte(v.shellWorkingDirs[result.CallID]))
+			code := v.toolCodes[result.CallID]
+			key.hash = fnv64aWrite(key.hash, []byte(code.Lang+"\x00"+code.Code))
 		}
 	}
 	if v.renderCache != nil {
@@ -851,7 +861,7 @@ func (v *View) renderMessage(m provider.Message, width int, turnOpen bool) []str
 					if tr.IsError {
 						lines = append(lines, toolBodyLine(v.Theme, v.Theme.FG256(color, "  error"), width, v.CompactMode))
 					}
-					for _, line := range view.renderToolResultWithSource(tr.Content, width, color, path, startLine, v.toolSources[tr.CallID]) {
+					for _, line := range view.renderToolResultWithCode(tr.Content, width, color, path, startLine, v.toolSources[tr.CallID], v.toolCodes[tr.CallID]) {
 						_, stripped := parseImageFootprint(line)
 						lines = append(lines, toolBodyLine(v.Theme, stripped, width, v.CompactMode))
 					}
@@ -866,7 +876,7 @@ func (v *View) renderMessage(m provider.Message, width int, turnOpen bool) []str
 				if tr.IsError {
 					lines = append(lines, toolBoxSide(v.Theme, v.Theme.FG256(color, "  error"), width))
 				}
-				for _, line := range view.renderToolResultWithSource(tr.Content, width, color, path, startLine, v.toolSources[tr.CallID]) {
+				for _, line := range view.renderToolResultWithCode(tr.Content, width, color, path, startLine, v.toolSources[tr.CallID], v.toolCodes[tr.CallID]) {
 					// Image-footprint rows (the escape row, the blank
 					// reservation rows beneath it, and the gap row
 					// before the metadata caption) are tagged with the
@@ -1009,7 +1019,7 @@ func (v *View) renderToolCall(tc ToolCallView, width int) []string {
 	// Finished tool call with no body: just the labelled top edge
 	// directly closed by the bottom. Avoids a blank interior row
 	// for no-output tools.
-	if bodyText == "" && len(tc.ResultContent) == 0 && codemodeSource(tc.Name, tc.RawJSONBuf) == "" {
+	if bodyText == "" && len(tc.ResultContent) == 0 && codemodeSource(tc.Name, tc.RawJSONBuf) == "" && !hasToolCode(tc.Name, tc.RawJSONBuf) {
 		if v.FlatTools || v.CompactMode {
 			if v.CompactMode {
 				lines = append(lines, compactToolBlank(v.Theme, width))
@@ -1073,6 +1083,13 @@ func (v *View) renderToolCallResult(tc ToolCallView, text string, width, color i
 			blocks = []provider.Content{provider.TextBlock{Text: text}}
 		}
 		return v.renderToolResultWithSource(blocks, width, color, tc.LivePath, 1, source)
+	}
+	if code, ok := codeFromToolArgs(tc.Name, json.RawMessage(tc.RawJSONBuf)); ok {
+		blocks := tc.ResultContent
+		if len(blocks) == 0 && text != "" {
+			blocks = []provider.Content{provider.TextBlock{Text: text}}
+		}
+		return v.renderToolResultWithCode(blocks, width, color, tc.LivePath, 1, "", code)
 	}
 	if len(tc.ResultContent) > 0 {
 		return v.renderToolResultContent(tc.ResultContent, width, color, tc.LivePath, 1)
@@ -1141,6 +1158,9 @@ func (v *View) renderLiveToolContent(tc ToolCallView, width int) []string {
 			prompt = "PS> "
 		}
 		return v.renderLiveShellCommand(command, width, prompt)
+	}
+	if code, ok := partialToolCode(tc.Name, tc.RawJSONBuf); ok {
+		return v.renderToolCodeBlock(code.Code, code.Lang, width)
 	}
 	return nil
 }
