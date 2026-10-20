@@ -2,14 +2,30 @@ package provider
 
 // Google Vertex AI client.
 //
-// Wire format is identical to the public Generative Language API
-// (generateContent / streamGenerateContent), so we reuse the existing
-// geminiClient and rewrite the outgoing URL + auth via a RoundTripper.
+// Vertex hosts models from multiple publishers behind the same
+// project/location, and each publisher has its own wire format:
 //
-// URL shape:
+//   - Gemini models speak the Generative Language API (generateContent /
+//     streamGenerateContent), identical to the public API, so we reuse
+//     the existing geminiClient and rewrite the outgoing URL + auth via
+//     a RoundTripper (vertexTransport).
+//   - Claude (Anthropic) models speak the native Anthropic Messages API
+//     via rawPredict/streamRawPredict, so we reuse the existing
+//     anthropicClient and rewrite both the URL/auth AND the request body
+//     via a second RoundTripper (vertexAnthropicTransport): the model id
+//     moves from the body into the URL, and anthropic_version moves from
+//     a header into the body.
+//
+// vertexModelRouter picks the right client per request based on the
+// requested model id.
+//
+// URL shapes:
 //
 //	POST https://{location}-aiplatform.googleapis.com/v1/projects/{project}/
 //	     locations/{location}/publishers/google/models/{model}:streamGenerateContent?alt=sse
+//
+//	POST https://{location}-aiplatform.googleapis.com/v1/projects/{project}/
+//	     locations/{location}/publishers/anthropic/models/{model}:streamRawPredict
 //
 // Auth: two paths supported.
 //
@@ -34,6 +50,7 @@ package provider
 //   GOOGLE_APPLICATION_CREDENTIALS  optional; service-account JSON path
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -336,6 +353,17 @@ func (t *vertexTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // in favor of env-based config (GOOGLE_CLOUD_API_KEY or
 // GOOGLE_APPLICATION_CREDENTIALS), since Vertex's auth model doesn't fit
 // the "just paste a key" interface other providers use.
+//
+// Vertex exposes two distinct publisher APIs behind the same project/
+// location, each with its own wire format: Gemini models speak the
+// Generative Language API (generateContent/streamGenerateContent,
+// "contents"/"functionDeclarations" shaped bodies), while Claude models
+// speak the native Anthropic Messages API
+// (publishers/anthropic/models/{id}:streamRawPredict, "messages"/"tools"
+// shaped bodies with an anthropic_version field instead of "model" in
+// the body). We route per-model between a Gemini-shaped client and an
+// Anthropic-shaped client so each publisher gets the body format it
+// actually expects.
 func NewVertex(_ string, _ string) Client {
 	cfg, err := loadVertexConfig()
 	if err != nil {
@@ -345,7 +373,7 @@ func NewVertex(_ string, _ string) Client {
 	if cfg.location != "global" {
 		baseHost = cfg.location + "-aiplatform.googleapis.com"
 	}
-	inner := &geminiClient{
+	geminiInner := &geminiClient{
 		apiKey:  "vertex-placeholder", // overwritten by transport
 		baseURL: "https://" + baseHost,
 		http: &http.Client{
@@ -353,8 +381,40 @@ func NewVertex(_ string, _ string) Client {
 			Timeout:   0,
 		},
 	}
-	// Wrap so Name() reports "google-vertex" instead of "google".
-	return &renamedClient{inner: inner, name: "google-vertex"}
+	anthropicInner := &anthropicClient{
+		apiKey:  "vertex-placeholder", // overwritten by transport
+		baseURL: "https://" + baseHost,
+		name:    "google-vertex",
+		http: &http.Client{
+			Transport: &vertexAnthropicTransport{inner: http.DefaultTransport, cfg: cfg},
+			Timeout:   0,
+		},
+	}
+	// Route per-model: Claude ids go to the Anthropic-shaped client,
+	// everything else (Gemini) keeps using the Gemini-shaped client.
+	// We route on the model id prefix rather than Model.API because
+	// user-defined models.json entries for google-vertex commonly don't
+	// set "api" (it's informational-only there; see usermodels.go).
+	router := &vertexModelRouter{gemini: geminiInner, anthropic: anthropicInner}
+	return &renamedClient{inner: router, name: "google-vertex"}
+}
+
+// vertexModelRouter dispatches a Vertex AI request to the Gemini-shaped
+// or Anthropic-shaped client based on the requested model id. Claude
+// model ids ("claude-...") use the Anthropic Messages wire format;
+// everything else uses the Gemini generateContent wire format.
+type vertexModelRouter struct {
+	gemini    Client
+	anthropic Client
+}
+
+func (r *vertexModelRouter) Name() string { return "google-vertex" }
+
+func (r *vertexModelRouter) Stream(ctx context.Context, req Request) (<-chan Event, error) {
+	if strings.HasPrefix(req.Model, "claude-") {
+		return r.anthropic.Stream(ctx, req)
+	}
+	return r.gemini.Stream(ctx, req)
 }
 
 // renamedClient wraps a Client and overrides its Name(). Used for
@@ -368,4 +428,86 @@ type renamedClient struct {
 func (r *renamedClient) Name() string { return r.name }
 func (r *renamedClient) Stream(ctx context.Context, req Request) (<-chan Event, error) {
 	return r.inner.Stream(ctx, req)
+}
+
+// vertexAnthropicVersion is the fixed anthropic_version value Vertex's
+// Claude rawPredict endpoint expects in the request body. Unlike the
+// public Anthropic API (which takes this as the anthropic-version
+// header), Vertex wants it inline in the JSON payload and has its own
+// versioning scheme independent of api.anthropic.com's.
+const vertexAnthropicVersion = "vertex-2023-10-16"
+
+// vertexAnthropicTransport adapts anthropicClient's native Messages-API
+// request (POST {baseURL}/v1/messages, body has top-level "model" and
+// relies on the anthropic-version HEADER) into Vertex's Claude rawPredict
+// shape: POST .../publishers/anthropic/models/{model}:streamRawPredict,
+// body has NO "model" field (it's in the URL) and carries
+// "anthropic_version" INLINE instead of as a header. Auth is Vertex's
+// (API key or OAuth bearer token), not an Anthropic x-api-key.
+type vertexAnthropicTransport struct {
+	inner http.RoundTripper
+	cfg   *vertexConfig
+}
+
+func (t *vertexAnthropicTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, fmt.Errorf("vertex: read request body: %w", err)
+	}
+	req.Body.Close()
+
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("vertex: parse anthropic request body: %w", err)
+	}
+	var modelID string
+	if raw, ok := payload["model"]; ok {
+		if err := json.Unmarshal(raw, &modelID); err != nil {
+			return nil, fmt.Errorf("vertex: parse model field: %w", err)
+		}
+	}
+	if modelID == "" {
+		return nil, fmt.Errorf("vertex: anthropic request body missing model")
+	}
+	delete(payload, "model")
+	// Vertex ignores "stream" as a body field the same way the public API
+	// does, but it must stay present and true since we always stream.
+	anthVersion, err := json.Marshal(vertexAnthropicVersion)
+	if err != nil {
+		return nil, err
+	}
+	payload["anthropic_version"] = anthVersion
+	newBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("vertex: re-marshal anthropic request body: %w", err)
+	}
+
+	newPath := fmt.Sprintf("/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:streamRawPredict",
+		t.cfg.project, t.cfg.location, modelID)
+	clone := req.Clone(req.Context())
+	if t.cfg.location == "global" {
+		clone.URL.Host = "aiplatform.googleapis.com"
+	} else {
+		clone.URL.Host = t.cfg.location + "-aiplatform.googleapis.com"
+	}
+	clone.URL.Path = newPath
+	clone.URL.RawQuery = ""
+	clone.Body = io.NopCloser(bytes.NewReader(newBody))
+	clone.ContentLength = int64(len(newBody))
+	clone.Header.Set("content-type", "application/json")
+	// Drop Anthropic-specific auth/version headers; Vertex uses its own
+	// GCP auth and the version travels in the body instead.
+	clone.Header.Del("x-api-key")
+	clone.Header.Del("anthropic-version")
+	clone.Header.Del("accept")
+	if t.cfg.apiKey != "" {
+		clone.Header.Set("x-goog-api-key", t.cfg.apiKey)
+	} else {
+		tok, err := vertexCache.get(req.Context(), t.cfg)
+		if err != nil {
+			return nil, err
+		}
+		clone.Header.Set("Authorization", "Bearer "+tok)
+	}
+	return t.inner.RoundTrip(clone)
 }
