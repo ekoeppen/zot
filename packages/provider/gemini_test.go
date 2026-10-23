@@ -663,3 +663,25 @@ func TestGeminiStreamToolCallWithThoughtSignature(t *testing.T) {
 		t.Fatalf("tool block thought signature=%q, want 'tool-sig-456'", tc.ThoughtSignature)
 	}
 }
+
+func TestConvertGemToolResultParts_IncludesImages(t *testing.T) {
+	blocks := []Content{
+		ToolResultBlock{
+			CallID: "call-1",
+			Content: []Content{
+				TextBlock{Text: "caption"},
+				ImageBlock{MimeType: "image/png", Data: []byte("raw-data")},
+			},
+		},
+	}
+	parts := convertGemToolResultParts(blocks)
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts, got %d", len(parts))
+	}
+	if parts[0].FunctionResponse == nil {
+		t.Fatalf("expected first part to be FunctionResponse")
+	}
+	if parts[1].InlineData == nil || parts[1].InlineData.MimeType != "image/png" {
+		t.Fatalf("expected second part to be InlineData, got %+v", parts[1])
+	}
+}
