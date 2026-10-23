@@ -465,7 +465,7 @@ func (a *Agent) promptWithPrelude(ctx context.Context, text string, images []pro
 			}
 		}
 		var mirror provider.Message
-		if a.Client != nil && (a.Client.Name() == "openai" || a.Client.Name() == "openai-codex") {
+		if a.Client != nil && (a.Client.Name() == "openai" || a.Client.Name() == "openai-codex" || a.Client.Name() == "github-copilot") {
 			mirror = mirrorToolImagesAsUser(tool)
 		}
 		a.mu.Lock()
@@ -605,7 +605,7 @@ func (a *Agent) runLoop(ctx context.Context, sink func(AgentEvent)) error {
 			// model. Both providers serialize images correctly when they
 			// arrive as user content, so the mirror covers them both.
 			var imageMirror provider.Message
-			if a.Client != nil && (a.Client.Name() == "openai" || a.Client.Name() == "openai-codex") {
+			if a.Client != nil && (a.Client.Name() == "openai" || a.Client.Name() == "openai-codex" || a.Client.Name() == "github-copilot") {
 				if mirror := mirrorToolImagesAsUser(toolMsg); len(mirror.Content) > 0 {
 					a.messages = append(a.messages, mirror)
 					a.rev++
