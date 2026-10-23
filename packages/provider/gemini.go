@@ -417,6 +417,16 @@ func convertGemToolResultParts(blocks []Content) []gemPart {
 				Response: respBytes,
 			},
 		})
+		for _, c := range tr.Content {
+			if img, ok := c.(ImageBlock); ok {
+				parts = append(parts, gemPart{
+					InlineData: &gemInlineData{
+						MimeType: img.MimeType,
+						Data:     base64.StdEncoding.EncodeToString(img.Data),
+					},
+				})
+			}
+		}
 	}
 	return parts
 }
