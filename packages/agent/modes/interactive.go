@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/patriceckhart/zot/packages/agent/extensions"
@@ -598,14 +599,11 @@ type Interactive struct {
 	pinnedSkillsPending bool
 	pinnedSkills        []*skills.Skill
 
-	// swarmWatch tracks auto-swarm sub-agents the main agent spawned
-	// via swarm_spawn. Each entry holds the agent + the task text;
-	// a per-entry goroutine waits on the agent's terminal state. When
-	// every tracked entry has finished, the watcher flushes a single
-	// summary turn into the main chat (queued if the main agent is
-	// busy, run immediately if idle).
-	swarmWatchMu sync.Mutex
-	swarmWatch   []*swarmWatchEntry
+	// swarmWatch tracks delegated initial tasks. Each task reports independently
+	// on prompt completion or daemon exit, queued if the main agent is busy.
+	swarmWatchMu      sync.Mutex
+	swarmWatch        []*swarmWatchEntry
+	swarmToolsEnabled atomic.Bool
 
 	// pendingFork is true when the user ran /session fork: the next
 	// jump-picker selection should branch off that message instead
@@ -7140,11 +7138,13 @@ func (a telegramSenderAdapter) Active() bool {
 // swarmWatchEntry is one tracked auto-swarm sub-agent. It records the
 // delegated turn's outcome separately from the long-lived daemon status.
 type swarmWatchEntry struct {
-	agent   *swarm.Agent
-	task    string
-	done    bool
-	outcome string
-	err     string
+	agent     *swarm.Agent
+	task      string
+	done      bool
+	outcome   string
+	err       string
+	snapshot  *swarm.AgentSnapshot
+	requestID string
 }
 
 // TrackSwarmAgent is the exported entry point used by the cli to
@@ -7194,25 +7194,37 @@ func (i *Interactive) completeSwarmWatchEntry(entry *swarmWatchEntry, outcome, e
 		i.swarmWatchMu.Unlock()
 		return
 	}
+	snapshot := entry.agent.Snapshot()
+	if response, turnErr, ok := entry.agent.InitialTurnResult(); ok {
+		snapshot.LastAssistant = response
+		snapshot.Tail = ""
+		snapshot.Err = ""
+		errMsg = turnErr
+		outcome = "completed"
+		if turnErr != "" {
+			outcome = "failed"
+		}
+	}
+	entry.snapshot = &snapshot
 	entry.done = true
 	entry.outcome = outcome
 	entry.err = errMsg
-	allDone := true
-	for _, e := range i.swarmWatch {
-		if !e.done {
-			allDone = false
+	// Report each completed task immediately. One stalled sibling must not
+	// withhold every other agent's result.
+	for idx, e := range i.swarmWatch {
+		if e == entry {
+			i.swarmWatch = append(i.swarmWatch[:idx], i.swarmWatch[idx+1:]...)
 			break
 		}
 	}
-	var batch []*swarmWatchEntry
-	if allDone {
-		batch = i.swarmWatch
-		i.swarmWatch = nil
-	}
 	i.swarmWatchMu.Unlock()
-	if len(batch) != 0 {
-		i.flushSwarmSummary(batch)
+	if i.cfg.Swarm != nil {
+		active := i.cfg.Swarm.ActiveSession()
+		if active != "" && entry.agent.SessionID != active {
+			return
+		}
 	}
+	i.flushSwarmSummary([]*swarmWatchEntry{entry})
 }
 
 // flushSwarmSummary composes a synthetic user turn describing every
@@ -7228,16 +7240,22 @@ func (i *Interactive) flushSwarmSummary(batch []*swarmWatchEntry) {
 	fmt.Fprintf(&sb, "[auto-swarm update] %d sub-agent(s) finished:\n\n", len(batch))
 	for idx, e := range batch {
 		snap := e.agent.Snapshot()
+		if e.snapshot != nil {
+			snap = *e.snapshot
+		}
 		status := e.outcome
 		if status == "" {
 			status = string(snap.Status)
 		}
-		task := snap.Task
+		task := e.task
 		if task == "" {
-			task = e.task
+			task = snap.Task
 		}
 		fmt.Fprintf(&sb, "%d. agent %s - status: %s\n", idx+1, snap.ID, status)
 		fmt.Fprintf(&sb, "   task: %s\n", truncateForSummary(task, 240))
+		if e.requestID != "" {
+			fmt.Fprintf(&sb, "   request: %s\n", e.requestID)
+		}
 		if snap.Err != "" {
 			fmt.Fprintf(&sb, "   error: %s\n", truncateForSummary(snap.Err, 240))
 		} else if e.err != "" {
@@ -7252,7 +7270,7 @@ func (i *Interactive) flushSwarmSummary(batch []*swarmWatchEntry) {
 		}
 		sb.WriteString("\n")
 	}
-	sb.WriteString("Briefly summarise the collective outcome for the user. Reference the agents by id. If any failed, suggest a follow-up; otherwise confirm completion. Do not spawn new sub-agents unless the user asks.")
+	sb.WriteString("Briefly summarise the reported task outcome, referencing agent and request ids. Other agents may still be working, so do not claim the entire request is complete without checking. If work failed or was interrupted, inspect its state before suggesting an explicit recovery. Never silently retry interrupted work. Do not spawn new sub-agents unless the user asks.")
 	i.SubmitOrQueue(sb.String(), nil)
 }
 
@@ -7325,15 +7343,22 @@ func (i *Interactive) applyOpenRouterServerTools(active bool) {
 }
 
 func (i *Interactive) applyAutoSwarmTool(active bool) {
+	i.swarmToolsEnabled.Store(active)
 	if i.agent == nil {
 		return
 	}
 	i.agent.UpdateTools(func(next core.Registry) core.Registry {
 		delete(next, "swarm_spawn")
+		for _, name := range []string{"swarm_status", "swarm_kill", "swarm_send", "swarm_cancel", "swarm_resume"} {
+			delete(next, name)
+		}
 		if active && i.cfg.Swarm != nil {
+			for _, tool := range tools.SwarmControlTools(i.cfg.Swarm, i.swarmToolsEnabled.Load, i.SwarmQueuedTurnCompleted) {
+				next[tool.Name()] = tool
+			}
 			next["swarm_spawn"] = &tools.SwarmSpawnTool{
 				Swarm:           i.cfg.Swarm,
-				Enabled:         func() bool { return true },
+				Enabled:         i.swarmToolsEnabled.Load,
 				DefaultModel:    func() string { return i.cfg.Model },
 				DefaultProvider: func() string { return i.cfg.Provider },
 				OnSpawned:       i.trackSwarmAgent,

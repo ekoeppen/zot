@@ -328,20 +328,59 @@ func parseEventLine(line string) (Event, bool) {
 // turn_end events (such as stop=tool_use) do not include step and
 // are not terminal for the delegated task.
 func notifyPromptTurnEnd(a *Agent, ev Event) {
-	if a == nil || ev.Type != "turn_end" {
+	if a == nil {
 		return
 	}
-	step, ok := ev.Data["step"].(float64)
-	if !ok {
-		return
-	}
-
 	a.mu.Lock()
+	a.lastEvent = ev.Time
+	if a.lastEvent.IsZero() {
+		a.lastEvent = time.Now()
+	}
+	step, promptLevel := ev.Data["step"].(float64)
+	if ev.Type == "agent_ready" {
+		a.ready = true
+		if busy, ok := ev.Data["busy"].(bool); ok {
+			a.busy = busy
+		}
+		a.signalTurnLocked()
+	}
+	if ev.Type == "turn_start" && promptLevel {
+		a.busy = true
+	}
+	if ev.Type != "turn_end" || !promptLevel {
+		a.mu.Unlock()
+		return
+	}
+	errMsg, _ := ev.Data["error"].(string)
+	a.busy = false
+	a.ready = true
+	a.lastTurnStep = int(step)
+	a.turnError = errMsg
+	if !a.initialTurnEnded {
+		a.initialTurnEnded = true
+		a.initialError = errMsg
+		a.initialResponse, a.hasInitialResponse = ev.Data["response"].(string)
+	}
+	id, _ := ev.Data["request_id"].(string)
+	if id != "" {
+		for idx := range a.followups {
+			turn := &a.followups[idx]
+			if turn.ID == id && turn.State == "dispatched" {
+				before := turn.QueuedTurn
+				finishQueuedTurn(&turn.QueuedTurn, ev)
+				if err := a.writeQueueLocked(); err != nil {
+					turn.QueuedTurn = before
+					a.lastErr = err
+				}
+				break
+			}
+		}
+	}
+	a.signalTurnLocked()
 	fn := a.OnTurnEnd
 	a.mu.Unlock()
 	if fn != nil {
-		errMsg, _ := ev.Data["error"].(string)
-		go fn(int(step), errMsg)
+		fn(int(step), errMsg)
 	}
 }
 

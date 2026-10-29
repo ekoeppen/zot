@@ -57,6 +57,11 @@ type LifecycleEvent struct {
 
 // Config configures a Swarm.
 type Config struct {
+	// OnQueueResult receives durable follow-up outcomes, including recovered
+	// results after Resume. It runs outside supervisor locks. Return false to
+	// retain an undelivered notice, for example while another session is active.
+	OnQueueResult func(*Agent, QueuedTurn) bool
+
 	// OnLifecycle observes start and terminal outcomes outside supervisor locks.
 	// It must return promptly. Different agents may invoke it concurrently.
 	OnLifecycle func(LifecycleEvent)
@@ -118,9 +123,10 @@ type Sink interface {
 type Swarm struct {
 	cfg Config
 
-	mu     sync.Mutex
-	agents map[string]*Agent
-	order  []string // creation order for stable listing
+	resumeMu sync.Mutex
+	mu       sync.Mutex
+	agents   map[string]*Agent
+	order    []string // creation order for stable listing
 
 	// activeSession is the host session id the dashboard is
 	// currently scoped to. When non-empty, SnapshotAll filters out
@@ -161,8 +167,17 @@ func New(cfg Config) *Swarm {
 // touching any agent state.
 func (f *Swarm) SetActiveSession(id string) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.activeSession = id
+	f.mu.Unlock()
+	for _, a := range f.List() {
+		if id != "" && a.SessionID != id {
+			continue
+		}
+		a.mu.Lock()
+		f.startQueueLocked(a)
+		a.signalTurnLocked()
+		a.mu.Unlock()
+	}
 }
 
 // ActiveSession returns the current scope, mostly for tests and
@@ -344,6 +359,8 @@ func (f *Swarm) run(a *Agent) {
 	err := a.runner.Run(a.ctx, agentSink{a: a})
 	a.mu.Lock()
 	a.finished = f.cfg.Now()
+	a.busy = false
+	a.ready = false
 	switch {
 	case a.status == StatusKilled:
 		// Already finalised by Stop.
@@ -485,6 +502,8 @@ func (f *Swarm) Shutdown(ctx context.Context) {
 // any source file — it only deletes the agent's state directory
 // under <root>/agents/<id>/.
 func (f *Swarm) Remove(id string) error {
+	f.resumeMu.Lock()
+	defer f.resumeMu.Unlock()
 	a := f.Get(id)
 	if a == nil {
 		return fmt.Errorf("no such agent %q", id)
@@ -495,6 +514,10 @@ func (f *Swarm) Remove(id string) error {
 	if st == StatusRunning || st == StatusPending {
 		return fmt.Errorf("agent %s still %s", a.ID, st)
 	}
+	// Stop marks the status before the runner and durable queue have exited.
+	// Do not remove files that an old worker can still write.
+	a.Wait()
+	a.queueWG.Wait()
 	// Best-effort cleanup of the per-agent state directory
 	// (meta.json, events.jsonl, session.json). Failing here would leave
 	// the user with no recourse,
@@ -526,6 +549,8 @@ type AgentSnapshot struct {
 	Tail          string   // last few transcript lines, joined with "\n"
 	Lines         []string // full transcript (already capped by Agent.appendTranscript)
 	LastAssistant string   // complete final assistant message, without role formatting
+	Busy          bool     // prompt-level state, unlike the display-only Activity
+	LastEvent     time.Time
 
 	// Model and Provider expose the per-agent overrides set at
 	// Spawn time (empty when the agent inherits the child's default
@@ -568,6 +593,8 @@ func (a *Agent) Snapshot() AgentSnapshot {
 		Started: a.Started, Finished: a.finished,
 		Err: errStr, Tail: tail, Lines: lines,
 		LastAssistant: a.lastAssistant,
+		Busy:          a.busy,
+		LastEvent:     a.lastEvent,
 		Model:         a.Model,
 		Provider:      a.Provider,
 		InboxPath:     a.InboxPath,

@@ -90,6 +90,13 @@ func (b *Inbox) SendInput(msg string) error {
 		}
 		b.conn = c
 	}
+	// A stale or wedged socket must not leave the supervisor blocked forever
+	// after suspend. A failed write is delivery-uncertain, never auto-retried.
+	if err := b.conn.SetWriteDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		_ = b.conn.Close()
+		b.conn = nil
+		return err
+	}
 	if _, err := io.WriteString(b.conn, msg+"\n"); err != nil {
 		// Drop the connection so the next call redials. The
 		// previous error is more informative than the redial's

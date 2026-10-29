@@ -83,106 +83,25 @@ func runSwarmAgentMode(ctx context.Context, args Args, version string) error {
 		"version": version,
 		"cwd":     r.CWD,
 		"model":   r.Model,
+		"busy":    initial.Text != "" || len(initial.Images) > 0,
 	})
 
-	// turnCtx is the per-turn context. We keep a per-process
-	// cancel so the "cancel" inbox message can interrupt an
-	// in-flight turn without tearing down the whole daemon.
-	var (
-		mu       sync.Mutex
-		turnCtx  context.Context = ctx
-		cancelFn context.CancelFunc
-		busyTurn bool
-		turnNo   int
-		shutdown = make(chan struct{})
-	)
-
-	runOne := func(prompt swarm.Prompt) {
-		mu.Lock()
-		if busyTurn {
-			// Drop concurrent turns rather than queuing. The
-			// supervisor protocol assumes one outstanding turn per
-			// agent; if a user really wants to interrupt and start
-			// another, they should send "cancel" first.
-			mu.Unlock()
-			em.emit("error", map[string]any{"message": "agent busy; send 'cancel' first"})
-			return
-		}
-		busyTurn = true
-		turnNo++
-		step := turnNo
-		turnCtx, cancelFn = context.WithCancel(ctx)
-		c := turnCtx
-		mu.Unlock()
-
-		em.emit("turn_start", map[string]any{"step": step})
-
-		sink := func(ev core.AgentEvent) {
-			em.emit(ev.Type(), modes.EventToJSON(ev))
-		}
-
+	return serveSwarmPrompts(ctx, initial, ln.Lines(), em.emit, func(turnCtx context.Context, prompt swarm.Prompt) (string, error) {
 		start := len(ag.Messages())
-		err := ag.Prompt(c, prompt.Text, prompt.Images, sink)
-		WriteNewTranscript(ag, sess, start)
-
-		em.emit("turn_end", map[string]any{
-			"step":  step,
-			"error": errString(err),
+		err := ag.Prompt(turnCtx, prompt.Text, prompt.Images, func(ev core.AgentEvent) {
+			em.emit(ev.Type(), modes.EventToJSON(ev))
 		})
-
-		mu.Lock()
-		busyTurn = false
-		cancelFn = nil
-		mu.Unlock()
-	}
-
-	// Initial task: run before processing the inbox so the agent
-	// "starts working" the moment it boots, matching what users
-	// expect from `/swarm new <task>`.
-	if initial.Text != "" || len(initial.Images) > 0 {
-		go runOne(initial)
-	}
-
-	// Inbox loop: one supervisor message at a time. We don't spawn
-	// a goroutine per turn because runOne already serialises them
-	// via the busyTurn flag; doing the dispatch on the main
-	// goroutine keeps the daemon's lifecycle easy to follow.
-	for {
-		select {
-		case <-ctx.Done():
-			em.emit("agent_stopped", map[string]any{"reason": "cancelled"})
-			return ctx.Err()
-		case <-shutdown:
-			em.emit("agent_stopped", map[string]any{"reason": "shutdown"})
-			return nil
-		case msg, ok := <-ln.Lines():
-			if !ok {
-				em.emit("agent_stopped", map[string]any{"reason": "inbox-closed"})
-				return nil
-			}
-			switch {
-			case msg == "shutdown":
-				close(shutdown)
-			case msg == "cancel":
-				mu.Lock()
-				if cancelFn != nil {
-					cancelFn()
+		WriteNewTranscript(ag, sess, start)
+		messages := ag.Messages()
+		for idx := len(messages) - 1; idx >= start; idx-- {
+			if messages[idx].Role == provider.RoleAssistant {
+				if text := core.MessageText(messages[idx]); text != "" {
+					return text, err
 				}
-				mu.Unlock()
-			case strings.HasPrefix(msg, "user ") || strings.HasPrefix(msg, "user-prompt "):
-				prompt, err := swarm.DecodePrompt(msg)
-				if err != nil {
-					em.emit("error", map[string]any{"message": err.Error()})
-					continue
-				}
-				go runOne(prompt)
-			default:
-				em.emit("error", map[string]any{
-					"message": "unknown supervisor message: " + truncateForLog(msg, 200),
-				})
 			}
 		}
-	}
+		return "", err
+	})
 }
 
 // swarmEmitter serialises events to stdout and (optionally) to a

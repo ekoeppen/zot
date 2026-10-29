@@ -1001,6 +1001,27 @@ conversation, whose ID the dashboard shows. `/swarm remove` deletes only the
 local mirror. There is no inbox socket and no per-agent session file in this
 mode. The subprocess runner remains the default without `--continuous`.
 
+The swarm supervisor reconnects after a lost host transport and reconciles each
+pending submission, including completions missed while disconnected or while a
+watch fell behind. Reconnection reuses stable request IDs and committed entry
+IDs, so it does not re-execute accepted work or duplicate mirrored output. It
+honors cancellation and reports non-transport failures instead of retrying them
+indefinitely. This is transport recovery, not a guarantee for every laptop
+suspend or provider failure. Recovery uses the host's bounded task history and
+newest 1,000 transcript entries. If the original response or its completion
+metadata is unavailable, the update reports a recovery error rather than an
+empty success or another turn's response. Inspect the host transcript before
+explicitly retrying such a request.
+
+With auto-swarm enabled, `swarm_cancel` and `swarm_resume` expose explicit
+recovery to the main agent. Host abort semantics still apply: cancelling can
+withdraw submissions already queued on the host. Such outcomes are reported,
+not silently replayed. Automated follow-ups not yet sent to the host remain in
+the local durable queue and are dispatched on resume. A stopped supervisor does
+not mean the host stopped working, so inspect outcomes before explicitly
+retrying an interrupted request. See the README's auto-swarm section for the
+local queue and notification recovery contract.
+
 ## Minimal Go example
 
 ```go

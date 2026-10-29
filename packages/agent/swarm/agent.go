@@ -90,6 +90,22 @@ type Agent struct {
 	// for them.
 	OnTurnEnd func(step int, errMsg string)
 
+	lastTurnStep       int
+	turnError          string
+	initialTurnEnded   bool
+	initialResponse    string
+	initialError       string
+	hasInitialResponse bool
+	turnChanged        chan struct{}
+	followups          []queuedTurn
+	queueRunning       bool
+	queueWG            sync.WaitGroup
+	queueLoadErr       error
+	queueWake          uint64
+	ready              bool
+	busy               bool
+	lastEvent          time.Time
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	runner Runner
@@ -110,6 +126,14 @@ func (a *Agent) Status() Status {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.status
+}
+
+// InitialTurnResult returns the recorded response and error of the first
+// delegated prompt, even if later manual or queued turns already finished.
+func (a *Agent) InitialTurnResult() (response, errMsg string, recorded bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.initialResponse, a.initialError, a.hasInitialResponse
 }
 
 // Activity returns the current one-line activity string.
@@ -141,11 +165,23 @@ func (a *Agent) Wait() { <-a.done }
 
 // SetOnTurnEnd installs (or clears, with nil) the callback fired
 // from the runner when the child daemon emits a prompt-level
-// turn_end event with a step field. Safe to call from any goroutine:
+// turn_end event with a step field. A late subscriber also receives the
+// latest observed completion asynchronously. Safe to call from any goroutine:
 // the runner reads the callback under the same mutex.
 func (a *Agent) SetOnTurnEnd(fn func(step int, errMsg string)) {
 	a.mu.Lock()
 	a.OnTurnEnd = fn
+	step, errMsg := a.lastTurnStep, a.turnError
+	a.mu.Unlock()
+	if fn != nil && step > 0 {
+		go fn(step, errMsg)
+	}
+}
+
+func (a *Agent) setPromptBusy(busy bool) {
+	a.mu.Lock()
+	a.busy = busy
+	a.signalTurnLocked()
 	a.mu.Unlock()
 }
 

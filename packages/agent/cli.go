@@ -858,6 +858,9 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 		RepoRoot:    r.CWD,
 		NewRunner:   swarmRunner,
 		OnLifecycle: func(e swarm.LifecycleEvent) { emitSwarmLifecycle(extMgr, e) },
+		OnQueueResult: func(a *swarm.Agent, turn swarm.QueuedTurn) bool {
+			return iv != nil && iv.SwarmQueuedTurnCompleted(a, turn)
+		},
 		ResolveCredential: func(ctx context.Context, providerID string) (swarm.Credential, error) {
 			if providerID == "ollama" {
 				return swarm.Credential{Value: "ollama", Method: "apikey"}, nil
@@ -901,6 +904,11 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 		}
 		if !AutoSwarmEnabled() {
 			return reg
+		}
+		for _, tool := range tools.SwarmControlTools(swarmMgr, AutoSwarmEnabled, func(a *swarm.Agent, turn swarm.QueuedTurn) bool {
+			return iv != nil && iv.SwarmQueuedTurnCompleted(a, turn)
+		}) {
+			reg[tool.Name()] = tool
 		}
 		reg["swarm_spawn"] = &tools.SwarmSpawnTool{
 			Swarm:           swarmMgr,

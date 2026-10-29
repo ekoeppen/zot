@@ -172,6 +172,11 @@ func (f *Swarm) Reload() (loaded int, errs []error) {
 			continue
 		}
 		a := f.buildDetachedAgent(m)
+		if err := a.loadQueue(); err != nil {
+			a.queueLoadErr = err
+			a.lastErr = err
+			errs = append(errs, err)
+		}
 		f.agents[m.ID] = a
 		f.order = append(f.order, m.ID)
 		f.mu.Unlock()
@@ -350,6 +355,8 @@ func replayEventsIntoAgent(a *Agent, evs []Event) {
 // Killed). Resuming a still-running agent returns an error so two
 // runners don't race for the same session.
 func (f *Swarm) Resume(ctx context.Context, id string) (*Agent, error) {
+	f.resumeMu.Lock()
+	defer f.resumeMu.Unlock()
 	existing := f.Get(id)
 	if existing == nil {
 		return nil, fmt.Errorf("swarm: no such agent %q", id)
@@ -360,6 +367,12 @@ func (f *Swarm) Resume(ctx context.Context, id string) (*Agent, error) {
 	if st == StatusRunning || st == StatusPending {
 		return nil, fmt.Errorf("swarm: agent %s is still %s; stop it first", existing.ID, st)
 	}
+	select {
+	case <-existing.done:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	existing.queueWG.Wait()
 	existing.loadFullTranscript()
 
 	// Rebuild from the meta record so we don't carry stale runner
@@ -402,6 +415,15 @@ func (f *Swarm) Resume(ctx context.Context, id string) (*Agent, error) {
 	if len(prev) > 0 {
 		a.appendTranscript(strings.Join(prev, "\n"))
 	}
+	a.lastAssistant = existing.Snapshot().LastAssistant
+	if err := a.loadQueue(); err != nil {
+		return nil, err
+	}
+	if len(a.followups) > 0 {
+		if err := a.writeQueueLocked(); err != nil {
+			return nil, err
+		}
+	}
 	a.ctx, a.cancel = context.WithCancel(ctx)
 	a.runner = f.cfg.NewRunner(a)
 
@@ -428,5 +450,8 @@ func (f *Swarm) Resume(ctx context.Context, id string) (*Agent, error) {
 	_ = writeAgentMeta(f.agentStateDir(a.ID), a)
 
 	go f.run(a)
+	a.mu.Lock()
+	f.startQueueLocked(a)
+	a.mu.Unlock()
 	return a, nil
 }

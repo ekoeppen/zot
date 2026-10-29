@@ -15,8 +15,10 @@ const MaxPromptWireBytes = 8 << 20
 // Prompt is an additive supervisor payload for user turns with images.
 // Legacy text-only user messages remain supported.
 type Prompt struct {
-	Text   string                `json:"text"`
-	Images []provider.ImageBlock `json:"images,omitempty"`
+	// RequestID correlates automated follow-ups with their prompt-level result.
+	RequestID string                `json:"request_id,omitempty"`
+	Text      string                `json:"text"`
+	Images    []provider.ImageBlock `json:"images,omitempty"`
 }
 
 // StartupInput shares a single stdin object with credential inheritance.
@@ -67,5 +69,10 @@ func DecodePrompt(msg string) (Prompt, error) {
 	if strings.TrimSpace(prompt.Text) == "" && len(prompt.Images) == 0 {
 		return Prompt{}, fmt.Errorf("swarm: empty prompt")
 	}
-	return PreparePrompt(prompt.Text, prompt.Images)
+	if len(prompt.RequestID) > 128 || strings.ContainsAny(prompt.RequestID, "\r\n") {
+		return Prompt{}, fmt.Errorf("swarm: invalid request id")
+	}
+	prepared, err := PreparePrompt(prompt.Text, prompt.Images)
+	prepared.RequestID = prompt.RequestID
+	return prepared, err
 }

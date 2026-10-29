@@ -2,7 +2,6 @@ package swarm
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"strings"
@@ -86,7 +85,7 @@ func (r *HostRunner) SendInput(msg string) error {
 // first spawn, and mirrors committed entries until the supervisor stops it or
 // a shutdown message arrives. It returns nil when the agent was shut down
 // cleanly, ctx.Err() when stopped, and an error when the host rejected work.
-func (r *HostRunner) Run(ctx context.Context, sink Sink) error {
+func (r *HostRunner) runConnected(ctx context.Context, sink Sink, state *hostRunState) (runErr error) {
 	if r.Dial == nil || r.agent == nil {
 		return errors.New("swarm: host runner requires a dial function and an agent")
 	}
@@ -95,6 +94,13 @@ func (r *HostRunner) Run(ctx context.Context, sink Sink) error {
 		return fmt.Errorf("swarm: connect to host: %w", err)
 	}
 	defer client.Close()
+	defer func() {
+		if runErr != nil && ctx.Err() == nil {
+			if hostTransportError(runErr) {
+				runErr = errHostDisconnected
+			}
+		}
+	}()
 	r.mu.Lock()
 	r.client = client
 	r.mu.Unlock()
@@ -154,13 +160,22 @@ func (r *HostRunner) Run(ctx context.Context, sink Sink) error {
 	if err := client.CallInto(ctx, "conversation.snapshot", map[string]any{"id": child.ID, "limit": 1000}, &snap); err != nil {
 		return fmt.Errorf("swarm: snapshot child: %w", err)
 	}
-	seen := map[string]bool{}
-	for _, e := range snap.Entries {
-		seen[e.ID] = true
+	if !state.attached && r.agent.Resuming {
+		// New logs retain entry IDs, allowing offline commits to be backfilled.
+		events, _ := ReadEventLog(r.agent.EventLogPath)
+		for _, ev := range events {
+			if id, _ := ev.Data["entry_id"].(string); id != "" {
+				state.seen[id] = true
+			}
+		}
+		if len(state.seen) == 0 {
+			for _, e := range snap.Entries {
+				state.seen[e.ID] = true
+			}
+		}
 	}
-	if !r.agent.Resuming {
-		r.mirrorEntries(snap.Entries, sink, nil)
-	}
+	state.mirror(r, snap.Entries, sink, emit)
+	state.attached = true
 	watch, err := client.Watch(ctx, child.ID, snap.Revision)
 	if err != nil {
 		return fmt.Errorf("swarm: watch child: %w", err)
@@ -168,7 +183,7 @@ func (r *HostRunner) Run(ctx context.Context, sink Sink) error {
 
 	// Follow-up request IDs are unique per supervisor incarnation: a resumed
 	// agent must not collide with the IDs an earlier incarnation used.
-	incarnation := rand.Text()
+	incarnation := state.incarnation
 	requireImages := func(images []provider.ImageBlock) error {
 		if len(images) == 0 {
 			return nil
@@ -183,10 +198,7 @@ func (r *HostRunner) Run(ctx context.Context, sink Sink) error {
 		if err := requireImages(prompt.Images); err != nil {
 			return err
 		}
-		r.mu.Lock()
-		r.sendSeq++
-		requestID := fmt.Sprintf("swarm/%s/%s/%d", r.agent.ID, incarnation, r.sendSeq)
-		r.mu.Unlock()
+		requestID := "swarm/" + r.agent.ID + "/" + prompt.RequestID
 		var sub continuous.Submission
 		params := map[string]any{"id": child.ID, "content": prompt.Text, "request_id": requestID}
 		if len(prompt.Images) > 0 {
@@ -195,30 +207,32 @@ func (r *HostRunner) Run(ctx context.Context, sink Sink) error {
 		if err := client.CallInto(ctx, "conversation.submit", params, &sub); err != nil {
 			return err
 		}
+		state.submissions[sub.ID] = prompt.RequestID
 		sink.Activity("queued")
 		return nil
 	}
-	if !r.agent.Resuming && (r.agent.Task != "" || len(r.agent.Images) > 0) {
-		if err := requireImages(r.agent.Images); err != nil {
-			return fmt.Errorf("swarm: task images: %w", err)
+	if !state.initialAdded {
+		state.initialAdded = true
+		if !r.agent.Resuming && (r.agent.Task != "" || len(r.agent.Images) > 0) {
+			state.prompts["task"] = Prompt{Text: r.agent.Task, Images: r.agent.Images, RequestID: "task"}
 		}
-		// The first submission reuses a stable request ID so a re-run of
-		// the same agent ID does not queue the task twice.
-		var sub continuous.Submission
-		params := map[string]any{"id": child.ID, "content": r.agent.Task, "request_id": "swarm/" + r.agent.ID + "/task"}
-		if len(r.agent.Images) > 0 {
-			params["images"] = r.agent.Images
-		}
-		if err := client.CallInto(ctx, "conversation.submit", params, &sub); err != nil {
-			return fmt.Errorf("swarm: submit task: %w", err)
-		}
-		sink.Activity("queued")
 	}
+	// Only stable, idempotent host request IDs are retried after transport loss.
+	for _, prompt := range state.prompts {
+		if err := submit(prompt); err != nil {
+			return fmt.Errorf("swarm: submit pending prompt: %w", err)
+		}
+	}
+	if err := state.reconcile(ctx, client, child.ID, r, sink, emit); err != nil {
+		return err
+	}
+	notifyPromptTurnEnd(r.agent, NewEvent("agent_ready", map[string]any{"busy": len(state.submissions) > 0 || (snap.Run != nil && snap.Run.Phase != "done")}))
 
 	inputs := r.inputChannel()
 	activeRun := ""
 	if snap.Run != nil && snap.Run.Phase != "done" {
 		activeRun = snap.Run.ID
+		notifyPromptTurnEnd(r.agent, NewEvent("turn_start", map[string]any{"step": float64(snap.Run.Turn)}))
 		sink.Activity("thinking")
 	}
 	for {
@@ -232,8 +246,8 @@ func (r *HostRunner) Run(ctx context.Context, sink Sink) error {
 			emit("agent_stopped", map[string]any{"reason": "cancelled", "conversation": child.ID})
 			return ctx.Err()
 		case <-client.Done():
-			emit("agent_stopped", map[string]any{"reason": "exit", "code": 1, "error": "host connection closed", "conversation": child.ID})
-			return errors.New("swarm: host connection closed")
+			emit("agent_disconnected", map[string]any{"conversation": child.ID})
+			return errHostDisconnected
 		case msg := <-inputs:
 			switch {
 			case msg == "shutdown":
@@ -249,11 +263,23 @@ func (r *HostRunner) Run(ctx context.Context, sink Sink) error {
 			case strings.HasPrefix(msg, "user ") || strings.HasPrefix(msg, "user-prompt "):
 				prompt, err := DecodePrompt(msg)
 				if err == nil {
+					if prompt.RequestID == "" {
+						r.sendSeq++
+						prompt.RequestID = fmt.Sprintf("%s/%d", incarnation, r.sendSeq)
+					}
+					state.prompts[prompt.RequestID] = prompt
 					err = submit(prompt)
 				}
 				if err != nil {
-					sink.Transcript("error: submit: " + err.Error())
-					emit("error", map[string]any{"message": "submit: " + err.Error()})
+					if hostTransportError(err) {
+						return errHostDisconnected
+					}
+					delete(state.prompts, prompt.RequestID)
+					data := map[string]any{"step": float64(1), "request_id": prompt.RequestID, "error": "submit: " + err.Error()}
+					emit("turn_end", data)
+					notifyPromptTurnEnd(r.agent, NewEvent("turn_end", data))
+				} else if err := state.reconcile(ctx, client, child.ID, r, sink, emit); err != nil {
+					return err
 				}
 			default:
 				sink.Transcript("error: unknown supervisor message")
@@ -267,34 +293,31 @@ func (r *HostRunner) Run(ctx context.Context, sink Sink) error {
 				if err := client.CallInto(ctx, "conversation.snapshot", map[string]any{"id": child.ID, "limit": 1000}, &snap); err != nil {
 					return fmt.Errorf("swarm: resnapshot child: %w", err)
 				}
-				r.mirrorEntries(snap.Entries, sink, seen)
+				state.mirror(r, snap.Entries, sink, emit)
+				r.agent.setPromptBusy(snap.Run != nil && snap.Run.Phase != "done")
+				if err := state.reconcile(ctx, client, child.ID, r, sink, emit); err != nil {
+					return err
+				}
 				if watch, err = client.Watch(ctx, child.ID, snap.Revision); err != nil {
 					return fmt.Errorf("swarm: rewatch child: %w", err)
 				}
 				continue
 			}
 			entries := continuous.EntriesFromCommit(cm, child.ID)
-			r.mirrorEntries(entries, sink, seen)
-			for _, e := range entries {
-				emitEntry(emit, e)
-			}
+			state.mirror(r, entries, sink, emit)
 			if run, ok := continuous.RunFromCommit(cm, child.ID); ok {
 				switch {
-				case run.Phase == "done" && run.ID == activeRun:
+				case run.Phase == "done":
 					activeRun = ""
-					errMsg := ""
-					if run.Outcome != "completed" {
-						errMsg = strings.TrimSuffix(run.Outcome+": "+run.Error, ": ")
-					}
-					emit("turn_end", map[string]any{"step": run.Turn, "error": errMsg, "outcome": run.Outcome})
-					notifyPromptTurnEnd(r.agent, Event{Type: "turn_end", Time: time.Now(), Data: map[string]any{"step": float64(run.Turn), "error": errMsg}})
-					if errMsg != "" {
-						sink.Transcript("error: " + errMsg)
+					r.agent.setPromptBusy(false)
+					if err := state.reconcile(ctx, client, child.ID, r, sink, emit); err != nil {
+						return err
 					}
 					sink.Activity("idle")
 				case run.Phase != "done" && run.ID != activeRun:
 					activeRun = run.ID
 					emit("turn_start", map[string]any{"step": run.Turn})
+					notifyPromptTurnEnd(r.agent, NewEvent("turn_start", map[string]any{"step": float64(run.Turn)}))
 					sink.Activity("thinking")
 				}
 			}
