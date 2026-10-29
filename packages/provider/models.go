@@ -326,6 +326,19 @@ var Catalog = []Model{
 		BaseURL: opperDefaultBaseURL,
 	},
 
+	// ---- Runcrate ----
+	// Seed entry only: deepseek-ai/DeepSeek-V4.1-Flash is the default returned
+	// by defaultModelForProvider so it resolves offline. Runcrate is an
+	// OpenAI-compatible inference API; limits and prices come from the public
+	// https://api.runcrate.ai/v1/models catalog (2026-10-28).
+	{
+		Provider: "runcrate", ID: "deepseek-ai/DeepSeek-V4.1-Flash", DisplayName: "DeepSeek V4.1 Flash (Runcrate)",
+		Input:         []string{"text", "image"},
+		ContextWindow: 1048576, MaxOutput: 1048576, Reasoning: true,
+		PriceInput: 0.147, PriceOutput: 0.441,
+		BaseURL: runcrateDefaultBaseURL,
+	},
+
 	// ---- Anthropic / newer families ----
 	{
 		Provider: "anthropic", ID: "claude-opus-4-5", DisplayName: "Claude Opus 4.5 (latest)",

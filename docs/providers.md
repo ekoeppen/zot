@@ -192,6 +192,7 @@ show instructions and should be configured with environment variables.
 | Yolo-Auto | `YOLO_AUTO_API_KEY` | `yolo-auto` |
 | Cheaper Inference | `CHEAPER_INFERENCE_API_KEY` | `cheaperinference` |
 | Opper | `OPPER_API_KEY` | `opper` |
+| Runcrate | `RUNCRATE_API_KEY` | `runcrate` |
 | Mistral | `MISTRAL_API_KEY` | `mistral` |
 | ZAI | `ZAI_API_KEY` | `zai` |
 | Xiaomi MiMo | `XIAOMI_API_KEY` | `xiaomi` |
@@ -302,6 +303,30 @@ default and explicit `models.json` overrides available. Explicit and saved
 model IDs are preserved before discovery finishes and are validated by the
 gateway. Without catalog metadata, requests use a conservative 4,096-token
 output limit. Keys come from https://platform.opper.ai.
+
+## Runcrate
+
+Use `RUNCRATE_API_KEY` or `/login` with provider `runcrate`. Runcrate is an
+OpenAI-compatible inference API at `https://api.runcrate.ai/v1`. Model IDs are
+`vendor/model`, and the offline default is `deepseek-ai/DeepSeek-V4.1-Flash`.
+
+Runcrate's model list is public. When a Runcrate key is configured, catalog
+discovery adds its tool-capable chat models to `/model`, including published
+context/output limits, vision, reasoning, and token prices. If the shared
+catalog cache has no Runcrate models, discovery runs even while that cache
+is fresh. Image, video, audio, and embedding models are excluded. The key
+probe uses the same list, so a mistyped key is reported by the first request
+rather than by `/login`.
+
+Explicit and saved `vendor/model` IDs are preserved before discovery finishes
+and are validated by the API. Without catalog metadata, requests use a
+conservative 4,096-token output limit. Keys come from
+https://www.runcrate.ai/dashboard/api-keys.
+
+```bash
+export RUNCRATE_API_KEY=...
+zot --provider runcrate --model zai-org/GLM-5.3
+```
 
 ## Local LM Studio server
 

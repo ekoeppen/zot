@@ -212,6 +212,8 @@ func defaultModelForProvider(prov string) string {
 		return "gpt-5.4-mini"
 	case "opper":
 		return "claude-sonnet-4-6"
+	case "runcrate":
+		return "deepseek-ai/DeepSeek-V4.1-Flash"
 	case "mistral":
 		return "mistral-large-latest"
 	case "zai":
@@ -253,7 +255,7 @@ func defaultModelForProvider(prov string) string {
 var knownProviders = []string{
 	"anthropic", "openai", "openai-codex", "openai-responses", "kimi", "deepseek", "google", "ollama", provider.LlamaCPPProviderID, provider.LMStudioProviderID,
 	"moonshotai", "moonshotai-cn",
-	"cerebras", "groq", "xai", "together", "huggingface", "openrouter", "gondola", "yolo-auto", "cheaperinference", "opper",
+	"cerebras", "groq", "xai", "together", "huggingface", "openrouter", "gondola", "yolo-auto", "cheaperinference", "opper", "runcrate",
 	"mistral", "zai",
 	"xiaomi", "xiaomi-token-plan-ams", "xiaomi-token-plan-cn", "xiaomi-token-plan-sgp",
 	"minimax", "minimax-cn",
@@ -522,6 +524,16 @@ func resolve(ctx context.Context, args Args, requireCred, inferenceOnly bool) (R
 	// provider/model IDs. Preserve explicit selections before asynchronous
 	// discovery completes; the gateway validates unknown IDs.
 	if err != nil && provName == "opper" {
+		resolvedModel = provider.Model{
+			Provider: provName, ID: model, DisplayName: model,
+			ContextWindow: 32768, MaxOutput: 4096, Source: "gateway",
+		}
+		err = nil
+	}
+	// Runcrate model IDs are vendor/model. Preserve route-qualified explicit
+	// selections before asynchronous discovery completes; the API validates
+	// unknown IDs. Plain unknown values still fall back to the default.
+	if err != nil && provName == "runcrate" && isGatewayRoutedModelID(model) {
 		resolvedModel = provider.Model{
 			Provider: provName, ID: model, DisplayName: model,
 			ContextWindow: 32768, MaxOutput: 4096, Source: "gateway",
@@ -1011,6 +1023,8 @@ func (r Resolved) NewClient() provider.Client {
 		return wrap(provider.NewCheaperInference(r.Credential, r.BaseURL))
 	case "opper":
 		return wrap(provider.NewOpper(r.Credential, r.BaseURL))
+	case "runcrate":
+		return wrap(provider.NewRuncrate(r.Credential, r.BaseURL))
 	case "zai":
 		return wrap(provider.NewZAI(r.Credential, r.BaseURL))
 	case "xiaomi":
@@ -1348,6 +1362,8 @@ func envVarName(provider string) string {
 		return "CHEAPER_INFERENCE"
 	case "opper":
 		return "OPPER"
+	case "runcrate":
+		return "RUNCRATE"
 	case "mistral":
 		return "MISTRAL"
 	case "zai":

@@ -143,6 +143,12 @@ func NewOpper(apiKey, baseURL string) Client {
 	return client
 }
 
+// NewRuncrate: Runcrate, an OpenAI Chat Completions-compatible inference API
+// for open-weight models addressed as vendor/model IDs.
+func NewRuncrate(apiKey, baseURL string) Client {
+	return NewOpenAICompat("runcrate", apiKey, baseURL, runcrateDefaultBaseURL)
+}
+
 // NewOpenCode routes Zen models through Chat Completions or Responses.
 func NewOpenCode(apiKey, baseURL string) Client {
 	const defaultBaseURL = "https://opencode.ai/zen/v1"
