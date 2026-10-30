@@ -2632,6 +2632,9 @@ type StatusBarParams struct {
 	// context percentage so it's clear where the spinner is coming from.
 	AutoCompacting bool
 
+	// Compactions counts successful compactions since the last user turn.
+	Compactions int
+
 	// Telegram true when the telegram bridge is connected. Adds a
 	// small "- tg -" tag to the cwd line so the user can tell at a
 	// glance that dms are being mirrored into this session.
@@ -2701,6 +2704,10 @@ func StatusBar(p StatusBarParams) []string {
 			ctx += " (auto)"
 		}
 		stats = append(stats, th.FG256(ctxColor, ctx))
+	}
+
+	if p.Compactions > 0 {
+		stats = append(stats, fmt.Sprintf("compactions: %d", p.Compactions))
 	}
 
 	// Layout uses exactly 2 spaces of horizontal padding everywhere:

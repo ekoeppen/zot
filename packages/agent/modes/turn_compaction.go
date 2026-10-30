@@ -7,6 +7,19 @@ import (
 	"github.com/patriceckhart/zot/packages/tui"
 )
 
+// compactTranscript counts only successful transcript replacements. Both manual
+// and automatic compaction paths use it, without changing core event streams.
+func (i *Interactive) compactTranscript(ctx context.Context, keepTail int, sink func(string)) (string, error) {
+	summary, err := i.agent.Compact(ctx, keepTail, sink)
+	if err == nil {
+		i.mu.Lock()
+		i.compactionsSinceInput++
+		i.mu.Unlock()
+		i.invalidate()
+	}
+	return summary, err
+}
+
 // compactBetweenTurns runs synchronously at the agent loop's safe boundary.
 // The active run retains ownership of cancellation, queues, and busy state.
 func (i *Interactive) compactBetweenTurns(ctx context.Context) error {
@@ -29,7 +42,7 @@ func (i *Interactive) compactBetweenTurns(ctx context.Context) error {
 	if count := len(i.agent.Messages()); keepTail >= count {
 		keepTail = count - 1
 	}
-	_, err := i.agent.Compact(ctx, keepTail, nil)
+	_, err := i.compactTranscript(ctx, keepTail, nil)
 
 	i.mu.Lock()
 	i.compacting = false

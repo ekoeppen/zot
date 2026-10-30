@@ -263,6 +263,12 @@ func TestContextWindowErrorCompactsAndRetriesPromptOnce(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("context-window error did not compact and retry the prompt")
 	}
+	waitTurnCompactionIdle(t, interactive)
+	interactive.mu.Lock()
+	defer interactive.mu.Unlock()
+	if interactive.compactionsSinceInput != 1 {
+		t.Fatalf("recovery count = %d, want 1", interactive.compactionsSinceInput)
+	}
 }
 
 func TestContextWindowRecoveryStopsAfterOneRetry(t *testing.T) {
@@ -311,6 +317,11 @@ func TestContextWindowRecoveryStopsAfterOneRetry(t *testing.T) {
 	client.mu.Unlock()
 	if calls != 3 {
 		t.Fatalf("provider called %d times, want initial request, compaction, and one retry", calls)
+	}
+	interactive.mu.Lock()
+	defer interactive.mu.Unlock()
+	if interactive.compactionsSinceInput != 1 {
+		t.Fatalf("failed retry erased recovery count: %d", interactive.compactionsSinceInput)
 	}
 }
 

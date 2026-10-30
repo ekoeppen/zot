@@ -125,6 +125,9 @@ func TestAutoCompactionBetweenToolBatches(t *testing.T) {
 			}
 			i.mu.Lock()
 			defer i.mu.Unlock()
+			if i.compactionsSinceInput != 0 {
+				t.Fatal("executed queued input did not reset compaction count")
+			}
 			if i.compacting || i.autoCompacting || i.statusErr != "" {
 				t.Fatalf("unexpected final state: compacting=%t auto=%t error=%q", i.compacting, i.autoCompacting, i.statusErr)
 			}
@@ -157,6 +160,9 @@ func TestBetweenTurnCompactionFailureStopsRun(t *testing.T) {
 			}
 			i.mu.Lock()
 			defer i.mu.Unlock()
+			if i.compactionsSinceInput != 0 {
+				t.Fatal("failed or cancelled compaction incremented count")
+			}
 			if i.compacting || i.autoCompacting || (!cancelled && i.statusErr == "") {
 				t.Fatal("compaction did not clean up or surface failure")
 			}

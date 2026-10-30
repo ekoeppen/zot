@@ -563,6 +563,11 @@ type Interactive struct {
 	// condense pass from a regular assistant turn.
 	autoCompacting bool
 
+	// Display-only count for the current input. The initial user_message
+	// must preserve compactions performed before sending that input.
+	compactionsSinceInput      int
+	awaitingInitialUserMessage bool
+
 	// updateInfo is the result of the async update check. Zero value
 	// while the check hasn't completed or nothing is available.
 	updateInfo UpdateInfo
@@ -1628,6 +1633,7 @@ func (i *Interactive) redraw() {
 		ContextUsed:    i.lastCtxInput,
 		ContextMax:     ctxMax,
 		AutoCompacting: i.autoCompacting,
+		Compactions:    i.compactionsSinceInput,
 		Telegram:       i.telegramBridge != nil && i.telegramBridge.Active(),
 		Execution:      i.executionTag(),
 		Cols:           cols,
@@ -4913,6 +4919,8 @@ func (i *Interactive) runSlash(ctx context.Context, cmd string) (done bool) {
 		i.pendingRescueImages = nil
 		i.statusErr = ""
 		i.statusOK = "started new session"
+		i.compactionsSinceInput = 0
+		i.awaitingInitialUserMessage = false
 		i.helpBlock = nil
 		i.parkedTurn = 0
 		i.parkedTotal = 0
@@ -4949,6 +4957,8 @@ func (i *Interactive) runSlash(ctx context.Context, cmd string) (done bool) {
 		i.scrollOffset = 0
 		i.extNotes = nil
 		i.startupNotes = nil
+		i.compactionsSinceInput = 0
+		i.awaitingInitialUserMessage = false
 		i.reloadErrors = nil
 		i.view.InvalidateRenderCache()
 		i.mu.Unlock()
@@ -5766,6 +5776,8 @@ func (i *Interactive) applySessionSelection(path string) {
 			i.invalidate()
 			return
 		}
+		i.compactionsSinceInput = 0
+		i.awaitingInitialUserMessage = false
 		i.statusOK = "resumed session: " + path
 		i.statusErr = ""
 		i.parkedTurn = 0
@@ -6069,7 +6081,7 @@ func (i *Interactive) runCompact(parent context.Context, auto bool) {
 	go func() {
 		// Sink discards deltas — we don't stream the summary to the UI.
 		sink := func(delta string) {}
-		summary, err := i.agent.Compact(ctx, 4, sink)
+		summary, err := i.compactTranscript(ctx, 4, sink)
 		_ = summary
 		i.mu.Lock()
 		i.busy = false
@@ -6087,6 +6099,7 @@ func (i *Interactive) runCompact(parent context.Context, auto bool) {
 		var nextTool *toolPromptRequest
 		var hasNext bool
 		var continueExisting bool
+		var resumePending bool
 
 		switch {
 		case err != nil && ctx.Err() != nil:
@@ -6137,6 +6150,7 @@ func (i *Interactive) runCompact(parent context.Context, auto bool) {
 				continueExisting = true
 				i.continueAfterCompact = false
 			case i.hasPendingCompactPrompt:
+				resumePending = true
 				next = i.pendingCompactPrompt
 				nextImages = i.pendingCompactImages
 				nextTool = i.pendingCompactTool
@@ -6168,6 +6182,8 @@ func (i *Interactive) runCompact(parent context.Context, auto bool) {
 			}
 			if continueExisting {
 				i.startTurnRequest(p, "", nil, true)
+			} else if resumePending {
+				i.startTurnRequestWithPrelude(p, next, nextImages, false, nextTool, false)
 			} else {
 				i.startTurnWithPrelude(p, next, nextImages, nextTool)
 			}
@@ -6324,14 +6340,14 @@ type toolPromptRequest struct {
 }
 
 func (i *Interactive) startTurnWithPrelude(parent context.Context, prompt string, images []provider.ImageBlock, tool *toolPromptRequest) {
-	i.startTurnRequestWithPrelude(parent, prompt, images, false, tool)
+	i.startTurnRequestWithPrelude(parent, prompt, images, false, tool, true)
 }
 
 func (i *Interactive) startTurnRequest(parent context.Context, prompt string, images []provider.ImageBlock, overflowRecoveryAttempted bool) {
-	i.startTurnRequestWithPrelude(parent, prompt, images, overflowRecoveryAttempted, nil)
+	i.startTurnRequestWithPrelude(parent, prompt, images, overflowRecoveryAttempted, nil, !overflowRecoveryAttempted)
 }
 
-func (i *Interactive) startTurnRequestWithPrelude(parent context.Context, prompt string, images []provider.ImageBlock, overflowRecoveryAttempted bool, tool *toolPromptRequest) {
+func (i *Interactive) startTurnRequestWithPrelude(parent context.Context, prompt string, images []provider.ImageBlock, overflowRecoveryAttempted bool, tool *toolPromptRequest, newInput bool) {
 	i.finishStartup()
 	if i.rejectAttachedImagePrompt(images) {
 		return
@@ -6359,6 +6375,12 @@ func (i *Interactive) startTurnRequestWithPrelude(parent context.Context, prompt
 	// The condense flow re-fires the user's queued prompt for us, so
 	// we just hand it off and exit.
 	i.mu.Lock()
+	// Reset before pre-turn compaction, but not when resuming its pending
+	// request or recovering the same input after context overflow.
+	if newInput {
+		i.compactionsSinceInput = 0
+		i.awaitingInitialUserMessage = true
+	}
 	i.agent.SetStreamReasoning(i.cfg.ShowReasoning)
 	needsPreCompact := !overflowRecoveryAttempted && !i.autoCompacting && i.shouldAutoCompactLocked()
 	if needsPreCompact {
@@ -6709,6 +6731,11 @@ func (i *Interactive) handleEvent(ev core.AgentEvent) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	switch e := ev.(type) {
+	case core.EvUserMessage:
+		if !i.awaitingInitialUserMessage {
+			i.compactionsSinceInput = 0
+		}
+		i.awaitingInitialUserMessage = false
 	case core.EvAssistantStart:
 		i.reasoning.Reset()
 		// Fires at the top of every oneTurn, including follow-up
@@ -7630,6 +7657,8 @@ func (i *Interactive) doSessionImport(src string) {
 		return
 	}
 	i.mu.Lock()
+	i.compactionsSinceInput = 0
+	i.awaitingInitialUserMessage = false
 	i.statusOK = "imported and switched to session " + friendlyPath(newPath)
 	i.statusErr = ""
 	i.mu.Unlock()
@@ -7804,6 +7833,8 @@ func (i *Interactive) applySessionTreeMessageSelection(src string, msgIdx, turnN
 	}
 	i.scrollToBottom()
 	i.mu.Lock()
+	i.compactionsSinceInput = 0
+	i.awaitingInitialUserMessage = false
 	if role == provider.RoleUser {
 		i.ed.SetValue(prompt)
 		i.statusOK = fmt.Sprintf("checked out before turn %d; edit and send to branch", turnNo)
@@ -7866,6 +7897,8 @@ func (i *Interactive) applyForkSelection(msgIdx int) {
 		return
 	}
 	i.mu.Lock()
+	i.compactionsSinceInput = 0
+	i.awaitingInitialUserMessage = false
 	i.statusOK = "forked and switched to new branch at " + friendlyPath(newPath)
 	i.statusErr = ""
 	i.mu.Unlock()
