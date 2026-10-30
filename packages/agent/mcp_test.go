@@ -180,6 +180,11 @@ func TestNonInteractiveAgentFollowsMCPChanges(t *testing.T) {
 
 // mcpFixtureServer serves one MCP tool named lookup over streamable HTTP.
 func mcpFixtureServer(t *testing.T) string {
+	return mcpFixtureServerWithInitialize(t, nil)
+}
+
+func mcpFixtureServerWithInitialize(t *testing.T, initialize func(context.Context)) string {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -196,6 +201,9 @@ func mcpFixtureServer(t *testing.T) string {
 		var result any = map[string]any{}
 		switch req.Method {
 		case "initialize":
+			if initialize != nil {
+				initialize(r.Context())
+			}
 			result = map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]string{"name": "f", "version": "1"}}
 		case "tools/list":
 			result = map[string]any{"tools": []any{map[string]any{"name": "lookup", "inputSchema": map[string]any{"type": "object"}}}}

@@ -159,9 +159,38 @@ func (d *mcpManagerDialog) Finish(notice string, err error) {
 }
 
 func (d *mcpManagerDialog) refreshLocked() {
+	name := ""
+	if d.view == mcpViewList && d.cursor < len(d.snap.Servers) {
+		name = d.snap.Servers[d.cursor].Name
+	}
 	if d.snapshot != nil {
 		d.snap = d.snapshot()
 	}
+	if name != "" {
+		for idx, s := range d.snap.Servers {
+			if s.Name == name {
+				d.cursor = idx
+				break
+			}
+		}
+	}
+	d.clampLocked()
+}
+
+// NeedsTickRefresh keeps initial connection progress live without animating
+// static dialogs or the add wizard's editor.
+func (d *mcpManagerDialog) NeedsTickRefresh() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.view == mcpViewClosed || d.view == mcpViewAdd || d.busy != "" {
+		return false
+	}
+	for _, s := range d.snap.Servers {
+		if s.State == mcp.StateConnecting {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *mcpManagerDialog) server() *mcp.ServerInfo {
@@ -527,6 +556,9 @@ func (d *mcpManagerDialog) Render(th tui.Theme, width int) []string {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.busy == "" {
+		d.refreshLocked()
+	}
 	var lines []string
 	var keys []string
 	switch view {
@@ -611,6 +643,8 @@ func stateMark(th tui.Theme, s mcp.State) string {
 
 func stateText(s mcp.ServerInfo) string {
 	switch s.State {
+	case mcp.StateConnecting:
+		return "connecting"
 	case mcp.StateConnected:
 		text := fmt.Sprintf("%d tools", s.ToolCount)
 		if s.ToolCount == 1 {

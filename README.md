@@ -1331,6 +1331,8 @@ In the main chat, image prompts (clipboard or `!@` selections) can be queued dur
 
 MCP tool support is built into zot. Add servers to `$ZOT_HOME/mcp.json` or the project's `.zot/mcp.json`, then start zot. Stdio, streamable HTTP, and legacy SSE are supported. Servers can provide tools and resources, such as files or documentation the model can read. Tools load through `mcp__search_tools` by default, avoiding large tool-schema payloads on every model request.
 
+Interactive startup discovers MCP servers in the background without waiting for network connections. `/mcp` shows connection progress per server. Tools apply at the next prompt boundary. If discovery is still pending, that prompt waits within the connection deadlines, and cancelling the prompt stops only its wait. Non-interactive modes keep blocking discovery before their first prompt.
+
 Run `/mcp` to manage servers in the TUI: press `a` to add one through a guided wizard, `l` to sign in to an OAuth server, `e` to enable or disable, `x` to change exposure, `t` to browse tools, `d` to remove, and `r` to reload all servers. Dropped connections reconnect on the next call, and tool-list changes apply without a reload. Use `/mcp reload` after editing configuration files by hand. MCP reloads independently of extensions. `--no-mcp` disables MCP loading for one run. Only load trusted project configurations, since discovery can launch server processes before the first prompt and jail mode does not confine them. Existing installations of the `mcp` bridge extension take precedence over built-in support.
 
 See [docs/mcp.md](docs/mcp.md) for configuration, authentication headers, exposure settings, migration, and current limitations.

@@ -11,10 +11,11 @@ import (
 type State string
 
 const (
-	StateConnected State = "connected"
-	StateFailed    State = "failed"
-	StateDisabled  State = "disabled"
-	StateInvalid   State = "invalid"
+	StateConnecting State = "connecting"
+	StateConnected  State = "connected"
+	StateFailed     State = "failed"
+	StateDisabled   State = "disabled"
+	StateInvalid    State = "invalid"
 	// StateSignIn marks an OAuth server without a usable token.
 	StateSignIn State = "sign-in required"
 )
@@ -61,7 +62,7 @@ type Snapshot struct {
 }
 
 // Snapshot returns the current server list ordered by attention: failed
-// and invalid first, then connected, then disabled, each by name.
+// and invalid first, then connecting, connected, and disabled, each by name.
 func (m *Manager) Snapshot() Snapshot {
 	// The token file is read once, before the lock, so rendering never
 	// performs file I/O while holding the manager lock.
@@ -107,6 +108,8 @@ func (m *Manager) Snapshot() Snapshot {
 			if s.raw.Command != "" || s.raw.URL != "" {
 				info.Transport = transportOf(s.raw)
 			}
+		case s.connecting:
+			info.State = StateConnecting
 		case errors.Is(s.err, ErrSignInRequired):
 			info.State = StateSignIn
 			info.Problem = "sign in to connect"
@@ -147,10 +150,12 @@ func rank(s State) int {
 	switch s {
 	case StateFailed, StateInvalid, StateSignIn:
 		return 0
-	case StateConnected:
+	case StateConnecting:
 		return 1
+	case StateConnected:
+		return 2
 	}
-	return 2
+	return 3
 }
 
 func describeTarget(c ServerConfig) string {

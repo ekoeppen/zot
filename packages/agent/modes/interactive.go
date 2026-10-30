@@ -1086,7 +1086,7 @@ func (i *Interactive) Run(ctx context.Context) error {
 			// of its inline editors (spawn task or prompt composer)
 			// is active so the cursor blink in those editors works
 			// the same way it does inside btw.
-			if i.busy || i.btwDialog.Loading() || i.swarmDialog.NeedsTickRefresh() {
+			if i.busy || i.btwDialog.Loading() || i.swarmDialog.NeedsTickRefresh() || i.mcpDialog.NeedsTickRefresh() {
 				requestRedraw()
 			}
 		}

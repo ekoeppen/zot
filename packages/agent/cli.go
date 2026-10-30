@@ -824,9 +824,7 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 	// haven't sent ready by then; ones that signalled earlier release
 	// the wait immediately.
 	extMgr.WaitForReady(3 * time.Second)
-	for _, err := range loadBuiltinMCP(ctx, extMgr, args, r.CWD) {
-		startupExtensionErrors = append(startupExtensionErrors, err.Error())
-	}
+	mcpSource := registerBuiltinMCP(extMgr, args, r.CWD)
 	defer extMgr.Stop(2 * time.Second)
 
 	extToolAdapter := &extToolAdapter{mgr: extMgr}
@@ -1738,6 +1736,13 @@ func runInteractive(ctx context.Context, args Args, version string) error {
 
 	if historyNotice != "" {
 		iv.Notify("continuous", "info", historyNotice)
+	}
+	// All UI pointers and registry hooks are initialized before discovery can
+	// deliver notifications. Tools are applied at the next prompt boundary.
+	if mcpSource != nil && extMgr.Builtin("mcp") == mcpSource {
+		for _, err := range mcpSource.StartDiscovery(ctx) {
+			iv.Notify("mcp", "error", err.Error())
+		}
 	}
 	runErr := iv.Run(ctx)
 

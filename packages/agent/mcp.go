@@ -10,6 +10,15 @@ import (
 // loadBuiltinMCP runs after extension discovery so existing bridge
 // installations take precedence without opening duplicate connections.
 func loadBuiltinMCP(ctx context.Context, mgr *extensions.Manager, args Args, cwd string) []error {
+	if source := registerBuiltinMCP(mgr, args, cwd); source != nil {
+		return source.Reload(ctx)
+	}
+	return nil
+}
+
+// registerBuiltinMCP installs management commands without starting connections.
+// Interactive startup starts discovery only after the UI and hooks are ready.
+func registerBuiltinMCP(mgr *extensions.Manager, args Args, cwd string) *mcp.Manager {
 	if args.NoMCP || args.NoTools {
 		return nil
 	}
@@ -22,7 +31,7 @@ func loadBuiltinMCP(ctx context.Context, mgr *extensions.Manager, args Args, cwd
 			return nil
 		}
 	}
-	return source.Reload(ctx)
+	return source
 }
 
 // moveBuiltinMCP points built-in MCP at a new working directory and

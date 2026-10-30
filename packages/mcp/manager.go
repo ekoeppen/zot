@@ -48,6 +48,10 @@ type Manager struct {
 	// onChange runs, without locks held, after the catalog changed outside
 	// a Reload, for example when a server announced new tools.
 	onChange func()
+	// discovery and discoveryDirty are protected by mu. Initial interactive
+	// discovery publishes tools here, and the next prompt refreshes its registry.
+	discovery      *discovery
+	discoveryDirty bool
 	// tempFiles holds large results handed to the model by path. They are
 	// removed when the manager closes.
 	tempFiles []string
@@ -60,8 +64,11 @@ type server struct {
 	source   string
 	override bool
 	client   *client.Client
-	process  *exec.Cmd
-	cancel   context.CancelFunc
+	// connecting marks an immutable placeholder, never a partially started
+	// connection. Discovery replaces it atomically after initialization.
+	connecting bool
+	process    *exec.Cmd
+	cancel     context.CancelFunc
 	// err is protected by Manager.mu after the server is published.
 	err error
 	// lost is set when an established connection drops, for example
@@ -292,11 +299,17 @@ func (m *Manager) rebuildLocked() []error {
 func (m *Manager) Reconnect(ctx context.Context, name string) error {
 	m.lifecycle.Lock()
 	defer m.lifecycle.Unlock()
-	m.mu.RLock()
+	m.mu.Lock()
 	old := m.servers[name]
 	_, wasInvalid := m.invalid[name]
 	cwd := m.cwd
-	m.mu.RUnlock()
+	// Retire a pending placeholder atomically with reading it. Its worker
+	// must neither publish later nor keep its old request alive.
+	if old != nil && old.connecting {
+		delete(m.servers, name)
+		old.cancel()
+	}
+	m.mu.Unlock()
 	loaded := loadConfigWithSources(m.home, cwd)
 	cfg, ok := loaded.configs[name]
 	reason, invalid := loaded.invalid[name]
@@ -451,13 +464,17 @@ func sameDefinitions(a, b []toolDefinition) bool {
 	return true
 }
 
-// RefreshStale reads the tool lists of servers that cannot announce
-// changes, when the last read is older than the refresh interval. Hosts
+// RefreshStale waits cancellably for initial background discovery, then reads
+// the tool lists of servers that cannot announce changes when stale. Hosts
 // call it before a prompt, so tools changed on such servers apply on the
 // next turn. Servers are read in parallel and failures keep the previous
-// list. It reports whether any catalog changed. OnChange is not called,
-// the caller refreshes its registry itself when the result is true.
+// list. It reports whether discovery or polling changed the catalog. OnChange
+// is not called, the caller refreshes its registry when the result is true.
 func (m *Manager) RefreshStale(ctx context.Context) bool {
+	changed, ready := m.waitDiscovery(ctx)
+	if !ready {
+		return false
+	}
 	m.mu.RLock()
 	var due []*server
 	for _, s := range m.servers {
@@ -470,18 +487,18 @@ func (m *Manager) RefreshStale(ctx context.Context) bool {
 	}
 	m.mu.RUnlock()
 	var wg sync.WaitGroup
-	var changed atomic.Bool
+	var relisted atomic.Bool
 	for _, s := range due {
 		wg.Add(1)
 		go func(s *server) {
 			defer wg.Done()
 			if m.relistContext(ctx, s, false) {
-				changed.Store(true)
+				relisted.Store(true)
 			}
 		}(s)
 	}
 	wg.Wait()
-	return changed.Load()
+	return changed || relisted.Load()
 }
 
 // revive reconnects a dropped server before a call. Only one caller
@@ -767,6 +784,7 @@ func (m *Manager) Close() {
 }
 
 func (m *Manager) close() {
+	m.cancelDiscovery()
 	m.mu.Lock()
 	old := m.servers
 	m.servers = map[string]*server{}
