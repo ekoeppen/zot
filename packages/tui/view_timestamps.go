@@ -39,7 +39,7 @@ func (v *View) messageTimestamps() []string {
 		}
 		stamp := m.Time.Local()
 		newDay := !last.IsZero() && stamp.Format("2006-01-02") != last.Format("2006-01-02")
-		if interval > 0 && !last.IsZero() && !newDay && stamp.Sub(last).Minutes() < float64(interval) {
+		if interval > 0 && !last.IsZero() && !newDay && !timestampFinalAnswer(m) && stamp.Sub(last).Minutes() < float64(interval) {
 			continue
 		}
 		format := "15:04"
@@ -50,6 +50,21 @@ func (v *View) messageTimestamps() []string {
 		last = stamp
 	}
 	return labels
+}
+
+// Completed assistant replies without tool calls end a response. Always label
+// them, even when a recent tool result consumed the interval. Classifying by
+// content keeps the label stable when later messages are appended or replayed.
+func timestampFinalAnswer(m provider.Message) bool {
+	if m.Role != provider.RoleAssistant {
+		return false
+	}
+	for _, c := range m.Content {
+		if _, ok := c.(provider.ToolCallBlock); ok {
+			return false
+		}
+	}
+	return true
 }
 
 func timestampMessageVisible(m provider.Message) bool {

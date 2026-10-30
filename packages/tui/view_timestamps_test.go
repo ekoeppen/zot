@@ -42,7 +42,9 @@ func TestChatTimestampIntervals(t *testing.T) {
 	five := 5
 	v := View{ChatTimestamps: true, ChatTimestampIntervalMinutes: &five}
 	for _, delta := range []time.Duration{0, 2 * time.Minute, 5*time.Minute - time.Second, 5 * time.Minute, 6 * time.Minute, 10 * time.Minute} {
-		v.Messages = append(v.Messages, timestampTestMessage(start.Add(delta)))
+		m := timestampTestMessage(start.Add(delta))
+		m.Role = provider.RoleUser
+		v.Messages = append(v.Messages, m)
 	}
 	want := []string{"2026-09-22 12:00", "", "", "12:05", "", "12:10"}
 	if got := v.messageTimestamps(); !reflect.DeepEqual(got, want) {
@@ -58,6 +60,52 @@ func TestChatTimestampIntervals(t *testing.T) {
 	negative := -1
 	if ChatTimestampInterval(nil) != 0 || ChatTimestampInterval(&negative) != 0 || ChatTimestampInterval(&zero) != 0 {
 		t.Fatal("incorrect interval defaults")
+	}
+}
+
+func TestChatTimestampFinalAnswerBypassesInterval(t *testing.T) {
+	start := time.Date(2026, 9, 22, 12, 0, 0, 0, time.Local)
+	five := 5
+	prompt := timestampTestMessage(start)
+	prompt.Role = provider.RoleUser
+	intermediate := timestampTestMessage(start.Add(14 * time.Minute))
+	intermediate.Content = append(intermediate.Content, provider.ToolCallBlock{ID: "call"})
+	tool := provider.Message{Role: provider.RoleTool, Time: start.Add(14 * time.Minute), Content: []provider.Content{
+		provider.ToolResultBlock{CallID: "call", Content: []provider.Content{provider.TextBlock{Text: "file written"}}},
+	}}
+	answer := timestampTestMessage(start.Add(15 * time.Minute))
+	v := View{Theme: Dark, ChatTimestamps: true, ChatTimestampIntervalMinutes: &five, Messages: []provider.Message{
+		prompt, intermediate, tool, answer,
+	}}
+	want := []string{"2026-09-22 12:00", "12:14", "", "12:15"}
+	if got := v.messageTimestamps(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("labels = %v, want %v", got, want)
+	}
+	if !strings.Contains(strings.Join(v.Build(80), "\n"), "12:15") {
+		t.Fatal("final answer timestamp missing from rendered transcript")
+	}
+
+	// Intermediate assistant text with a tool call still obeys the interval.
+	v.Messages[1].Time = start.Add(time.Minute)
+	want = []string{"2026-09-22 12:00", "", "12:14", "12:15"}
+	if got := v.messageTimestamps(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("intermediate labels = %v, want %v", got, want)
+	}
+	// A tool timestamp immediately before the answer must not suppress it.
+	v.Messages = []provider.Message{prompt, tool, answer}
+	want = []string{"2026-09-22 12:00", "12:14", "12:15"}
+	if got := v.messageTimestamps(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("labels = %v, want %v", got, want)
+	}
+	// Completing a short answer also qualifies. Later prompts do not remove
+	// its timestamp, and interval selection resumes from the answer's time.
+	v.Messages[2].Time = start.Add(14*time.Minute + time.Second)
+	next := timestampTestMessage(start.Add(16 * time.Minute))
+	next.Role = provider.RoleUser
+	v.Messages = append(v.Messages, next)
+	want = []string{"2026-09-22 12:00", "12:14", "12:14", ""}
+	if got := v.messageTimestamps(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("labels after next prompt = %v, want %v", got, want)
 	}
 }
 
