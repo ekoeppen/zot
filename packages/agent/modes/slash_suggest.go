@@ -69,6 +69,7 @@ var sessionSlashCommands = []slashCommand{
 	{Name: "/session fork", Desc: "branch from a past user message"},
 	{Name: "/session tree", Desc: "switch between session branches"},
 	{Name: "/session copy-id", Desc: "copy the current session UUID to the clipboard"},
+	{Name: "/session strip", Desc: "remove all tool calls and responses from the transcript"},
 }
 
 // slashSuggester renders the popup that appears when the editor starts

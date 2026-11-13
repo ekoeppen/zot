@@ -18,7 +18,7 @@ type sessionOpsDialog struct {
 
 type sessionOpsItem struct {
 	label  string
-	action string // "timeline" | "export" | "import" | "fork" | "tree" | "copy-id"
+	action string // "timeline" | "export" | "import" | "fork" | "tree" | "copy-id" | "strip"
 	hint   string
 }
 

@@ -579,7 +579,7 @@ Slash command names are case-insensitive in the TUI and messaging backends; argu
 | `/llama` | Connect to the configured llama.cpp router, load, unload, or remove cached models, and search/download GGUF models from Hugging Face with live progress. Shown after llama.cpp login is configured. |
 | `/sessions` | Resume a previous session for this directory. |
 | `/new` | Persist the current conversation and start a fresh session in the same directory. Unavailable with `--no-session`. |
-| `/session` | Show the current session UUID and alias, inspect its `timeline`, `export` to a portable `.zotsession` file, `import` one back in, `fork` from a past user message, view its branch `tree`, or `copy-id` to the clipboard. Opens a picker without an argument. Default export destination is `~/Downloads`. |
+| `/session` | Show the current session UUID and alias, inspect its `timeline`, `export` to a portable `.zotsession` file, `import` one back in, `fork` from a past user message, view its branch `tree`, `copy-id` to the clipboard, or `strip` all tool calls and responses from the transcript. Opens a picker without an argument; direct forms include `/session timeline`, `/session copy-id`, `/session export [path]`, `/session import <path>`, `/session fork`, `/session tree`, and `/session strip`. Default export destination is `~/Downloads`. |
 | `/jump` | Scroll the chat to a previous turn (or `/jump <text>` to filter). |
 | `/btw` | Side chat with full context that doesn't add to the main thread. |
 | `/swarm` | Spawn, monitor, and chat with background subagents. Each runs in parallel with your main session and shares its working directory. |
@@ -623,6 +623,7 @@ Shows previous sessions for the current working directory, newest first, with ti
 - **`/session import <path>`**. Copies a `.zotsession` file into `$ZOT_HOME/sessions/<cwd-hash>/` with a fresh id and the current cwd, then switches the running agent onto it. Imported sessions are first-class: they show up in `/sessions`, `/jump`, and the tree. Drag-drop paths in the editor are accepted (zot strips the surrounding quotes automatically).
 - **`/session fork`**. Opens a turn picker (same shape as `/jump`). Pick any past user message; zot copies every message up to and including that turn into a new session, records `parent` + `fork_point` in the new meta, and switches onto the branch. The parent session stays on disk. Use it to try a different question without polluting the original transcript, or to rewind after the agent went down the wrong path.
 - **`/session tree`**. Shows every session in the current cwd arranged by parent/child relationships, depth-first with indent per level. The current session is tagged `[current]`. Pick any entry to switch into it. Parentless sessions are roots; branches created via `/session fork` nest under whichever session they were forked from. Orphaned children (whose parent file was deleted) still show as roots so they stay discoverable.
+- **`/session strip`**. Removes all tool calls and tool responses (along with tool-only assistant turns) from the active transcript while keeping user and assistant text/images, and writes a compaction checkpoint so resuming or branching uses the stripped transcript while preserving earlier raw JSONL rows on disk. Cancels any active turn before mutating the transcript.
 
 ### `/jump`
 
@@ -1504,7 +1505,7 @@ You can keep typing while the agent is working. Pressing `enter` during a turn q
 
 To recover the most recently queued message back into the editor (to tweak it before it runs), press `Option+↑`. In VS Code's integrated terminal that chord doesn't survive xterm.js's macOS key handling — use `Option+Shift+↑` there. zot's hint line under the sliding-in queue adapts automatically based on `$TERM_PROGRAM`.
 
-Slash commands also work while the agent is busy. Non-destructive ones (`/help`, `/jump`, `/btw`, `/sessions`, `/skills`, `/reasoning`, `/settings`, `/jail`, `/unjail`, `/exit`) take effect immediately. Destructive ones (`/new`, `/clear`, `/compact`, `/login`, `/logout`, `/model`, `/mcp reload`, `/reload-ext`) cancel the active turn first and then run.
+Slash commands also work while the agent is busy. Non-destructive ones (`/help`, `/jump`, `/btw`, `/sessions`, `/skills`, `/reasoning`, `/settings`, `/jail`, `/unjail`, `/exit`) take effect immediately. Destructive ones (`/new`, `/clear`, `/compact`, `/session strip`, `/login`, `/logout`, `/model`, `/mcp reload`, `/reload-ext`) cancel the active turn first and then run.
 
 
 ## Keys (interactive mode)
