@@ -7536,9 +7536,9 @@ func (h *telegramHost) Notify(level, message string) {
 }
 
 // openSessionOpsDialog shows the picker for `/session` with no arg.
-// Always offers timeline, export, import, fork, and tree. The handlers bail
-// with a clear status message when a precondition is not met (empty transcript
-// on fork; no parent/siblings on tree).
+// Always offers timeline, export, import, fork, tree, and strip. The handlers
+// bail with a clear status message when a precondition is not met (empty
+// transcript on fork; no parent/siblings on tree).
 func (i *Interactive) openSessionOpsDialog() {
 	items := []sessionOpsItem{
 		{label: "timeline", action: "timeline", hint: "inspect context, messages, and tool calls"},
@@ -7546,14 +7546,15 @@ func (i *Interactive) openSessionOpsDialog() {
 		{label: "import", action: "import", hint: "load a .zotsession file into this directory"},
 		{label: "fork", action: "fork", hint: "branch from a past user message into a new session"},
 		{label: "tree", action: "tree", hint: "switch between branches in this directory"},
+		{label: "strip", action: "strip", hint: "remove all tool calls and responses from the transcript"},
 	}
 	i.sessionOpsDialog.Open(items)
 	i.invalidate()
 }
 
-// doSessionOp dispatches timeline, export, import, fork, or tree. arg is the
-// optional positional argument from e.g. /session export <path>
-// or /session import <path>; timeline, fork, and tree ignore it.
+// doSessionOp dispatches timeline, export, import, fork, tree, or strip. arg is
+// the optional positional argument from e.g. /session export <path>
+// or /session import <path>; timeline, fork, tree, and strip ignore it.
 func (i *Interactive) doSessionOp(action, arg string) {
 	switch action {
 	case "timeline":
@@ -7566,9 +7567,11 @@ func (i *Interactive) doSessionOp(action, arg string) {
 		i.doSessionFork()
 	case "tree":
 		i.doSessionTree()
+	case "strip":
+		i.doSessionStrip()
 	default:
 		i.mu.Lock()
-		i.statusErr = "unknown /session action: " + action + " (use timeline, export, import, fork, or tree)"
+		i.statusErr = "unknown /session action: " + action + " (use timeline, export, import, fork, tree, or strip)"
 		i.mu.Unlock()
 		i.invalidate()
 	}
@@ -7930,6 +7933,69 @@ func (i *Interactive) applyForkSelection(msgIdx int) {
 	i.statusErr = ""
 	i.mu.Unlock()
 	i.invalidate()
+}
+
+// doSessionStrip removes all tool calls and tool responses from the active
+// transcript and persists a compaction checkpoint when anything was removed.
+func (i *Interactive) doSessionStrip() {
+	if i.rejectAttachedAction("/session strip", "session transcripts are managed by the host") {
+		return
+	}
+	if i.agent == nil {
+		i.mu.Lock()
+		i.statusErr = "not logged in. type /login first."
+		i.statusOK = ""
+		i.mu.Unlock()
+		i.invalidate()
+		return
+	}
+	i.cancelAndWaitForIdle()
+
+	calls, results := i.agent.StripToolCalls()
+	if calls == 0 && results == 0 {
+		i.mu.Lock()
+		i.statusErr = ""
+		i.statusOK = "no tool calls or responses to strip"
+		i.mu.Unlock()
+		i.invalidate()
+		return
+	}
+
+	msgs := i.agent.Messages()
+	i.mu.Lock()
+	i.view.Messages = filterHiddenTranscriptMessages(msgs)
+	i.lastCtxInput = estimateTimelineMessageTokens(msgs)
+	i.toolCalls = map[string]*tui.ToolCallView{}
+	i.toolOrder = nil
+	i.toolGate = map[string]int{}
+	i.parkedTurn = 0
+	i.parkedTotal = 0
+	i.scrollOffset = 0
+	i.prevChatLen = 0
+	i.prevChatCols = 0
+	if len(i.view.Messages) > initialResumeTailLimit {
+		i.view.TailLimit = initialResumeTailLimit
+	} else {
+		i.view.TailLimit = 0
+	}
+	i.view.InvalidateRenderCache()
+	i.statusErr = ""
+	i.statusOK = formatStripStatus(calls, results)
+	i.mu.Unlock()
+	i.invalidate()
+}
+
+func formatStripStatus(calls, results int) string {
+	return fmt.Sprintf("stripped %s and %s",
+		stripCountLabel(calls, "tool call", "tool calls"),
+		stripCountLabel(results, "tool response", "tool responses"))
+}
+
+func stripCountLabel(n int, singular, plural string) string {
+	if n == 1 {
+		return "1 " + singular
+	}
+	return fmt.Sprintf("%d %s", n, plural)
 }
 
 // formatInt is a tiny strconv.Itoa shim; keeps the handler above

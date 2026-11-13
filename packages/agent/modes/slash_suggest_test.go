@@ -73,6 +73,7 @@ func TestSlashSuggesterCompletesSessionActions(t *testing.T) {
 		"/session import",
 		"/session fork",
 		"/session tree",
+		"/session strip",
 	}; !slices.Equal(got, want) {
 		t.Fatalf("matches = %v, want %v", got, want)
 	}
@@ -81,6 +82,9 @@ func TestSlashSuggesterCompletesSessionActions(t *testing.T) {
 	}
 	if got := s.Selection("/session t"); got != "/session timeline" {
 		t.Fatalf("selection = %q, want /session timeline", got)
+	}
+	if got := commandNames(s.matches("/session s")); !slices.Equal(got, []string{"/session strip"}) {
+		t.Fatalf("strip matches = %v", got)
 	}
 }
 

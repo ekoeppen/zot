@@ -68,6 +68,7 @@ var sessionSlashCommands = []slashCommand{
 	{Name: "/session import", Desc: "load a .zotsession file into this directory"},
 	{Name: "/session fork", Desc: "branch from a past user message"},
 	{Name: "/session tree", Desc: "switch between session branches"},
+	{Name: "/session strip", Desc: "remove all tool calls and responses from the transcript"},
 }
 
 // slashSuggester renders the popup that appears when the editor starts

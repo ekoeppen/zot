@@ -23,7 +23,8 @@ func TestInteractiveSlashControlNavigation(t *testing.T) {
 		{'n', "/session import"},
 		{'n', "/session fork"},
 		{'n', "/session tree"},
-		{'n', "/session tree"},
+		{'n', "/session strip"},
+		{'n', "/session strip"},
 	} {
 		i.handleKey(context.Background(), tui.Key{Kind: tui.KeyRune, Rune: step.key, Ctrl: true})
 		if got := i.suggest.Selection(i.ed.Value()); got != step.want {
